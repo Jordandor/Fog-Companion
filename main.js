@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, screen, clipboard, shell, Tray, Menu, crashReporter } = require("electron");
+const { app, BrowserWindow, ipcMain, globalShortcut, screen, clipboard, shell, Tray, Menu, crashReporter, net } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
@@ -9,6 +9,8 @@ if(!hasSingleInstanceLock)app.quit();
 
 const diagnosticsDir=path.join(app.getPath("userData"),"diagnostics");
 const crashDumpDir=path.join(diagnosticsDir,"dumps");
+const runtimeDir=path.join(app.getPath("userData"),"runtime");
+const runtimeInputHelper=path.join(runtimeDir,"input-helper.ps1");
 const sessionMarker=path.join(diagnosticsDir,"active-session.json");
 const sessionId=`${new Date().toISOString().replace(/[:.]/g,"-")}-${process.pid}`;
 if(hasSingleInstanceLock){fs.mkdirSync(crashDumpDir,{recursive:true});app.setPath("crashDumps",crashDumpDir);crashReporter.start({productName:"Fog Companion",uploadToServer:false,extra:{version:app.getVersion(),sessionId}})}
@@ -24,6 +26,39 @@ function logDiagnostic(level,event,details={}){
 }
 function writeCrashReport(kind,error,details={}){
   try{fs.mkdirSync(diagnosticsDir,{recursive:true});const file=path.join(diagnosticsDir,`crash-${new Date().toISOString().replace(/[:.]/g,"-")}-${kind}.json`);fs.writeFileSync(file,JSON.stringify({time:diagnosticStamp(),sessionId,pid:process.pid,version:app.getVersion(),kind,error:diagnosticValue(error),details:diagnosticValue(details)},null,2),"utf8");logDiagnostic("error",kind,{report:file,error:diagnosticValue(error),...details});return file}catch{return""}
+}
+async function openDiagnosticsFolder(){
+  fs.mkdirSync(diagnosticsDir,{recursive:true});
+  const error=await shell.openPath(diagnosticsDir);
+  if(error){logDiagnostic("error","open-diagnostics-failed",{error});throw new Error(error)}
+  return diagnosticsDir;
+}
+function ensureInputHelper(){
+  fs.mkdirSync(runtimeDir,{recursive:true});
+  const bundledCandidates=[path.join(process.resourcesPath,"input-helper.ps1"),path.join(__dirname,"input-helper.ps1")];
+  const bundled=bundledCandidates.find(candidate=>fs.existsSync(candidate));
+  if(bundled){
+    const source=fs.readFileSync(bundled);
+    const current=fs.existsSync(runtimeInputHelper)?fs.readFileSync(runtimeInputHelper):null;
+    if(!current||!source.equals(current)){
+      fs.writeFileSync(runtimeInputHelper,source);
+      logDiagnostic("info","selection-helper-installed",{sourcePath:bundled,destination:runtimeInputHelper,bytes:source.length});
+    }
+  }
+  if(!fs.existsSync(runtimeInputHelper)){
+    const error=new Error("Служебный файл автовыбора не найден. Переустановите актуальную версию Fog Companion.");
+    writeCrashReport("selection-helper-missing",error,{bundledCandidates,runtimeInputHelper});
+    throw error;
+  }
+  return runtimeInputHelper;
+}
+function decodePowerShellOutput(value){
+  const buffer=Buffer.isBuffer(value)?value:Buffer.concat(value||[]);
+  if(!buffer.length)return"";
+  const utf8=buffer.toString("utf8");
+  if(!utf8.includes("�"))return utf8.trim();
+  const variants=["ibm866","windows-1251"].map(encoding=>{try{return new TextDecoder(encoding).decode(buffer)}catch{return""}}).filter(Boolean);
+  return variants.sort((left,right)=>(right.match(/[А-Яа-яЁё]/g)||[]).length-(left.match(/[А-Яа-яЁё]/g)||[]).length)[0]?.trim()||utf8.trim();
 }
 function beginDiagnosticSession(){
   try{if(fs.existsSync(sessionMarker)){const previous=JSON.parse(fs.readFileSync(sessionMarker,"utf8"));writeCrashReport("unclean-shutdown",new Error("Предыдущая сессия завершилась без штатного выхода."),{previous})}fs.writeFileSync(sessionMarker,JSON.stringify({sessionId,pid:process.pid,startedAt:diagnosticStamp(),version:app.getVersion()},null,2),"utf8");logDiagnostic("info","app-start",{version:app.getVersion(),packaged:app.isPackaged})}catch(error){logDiagnostic("error","diagnostics-init-failed",error)}
@@ -46,25 +81,55 @@ const statsOrigin = "https://stats.deadbydaylight.com";
 const assetsOrigin = "https://assets.live.bhvraccount.com";
 const githubRepository = "Jordandor/Fog-Companion";
 const githubLatestReleaseApi = `https://api.github.com/repos/${githubRepository}/releases/latest`;
+const githubPackageManifest = `https://raw.githubusercontent.com/${githubRepository}/main/package.json`;
 const appIcon = () => path.join(__dirname,"assets","fog-companion.ico");
 let updateState={status:"idle",currentVersion:app.getVersion(),latestVersion:"",message:"Обновления еще не проверялись.",downloadUrl:"",checksumUrl:""};
 
 const versionParts=value=>String(value||"").replace(/^v/i,"").split(/[.-]/).slice(0,3).map(part=>Number.parseInt(part,10)||0);
 function isNewerVersion(candidate,current){const next=versionParts(candidate),installed=versionParts(current);for(let index=0;index<3;index++){if(next[index]!==installed[index])return next[index]>installed[index]}return false}
 function publishUpdateState(next){updateState={...updateState,...next,currentVersion:app.getVersion()};send("update:status",updateState);return updateState}
-async function githubResponse(url){
-  const response=await fetch(url,{headers:{Accept:"application/vnd.github+json","User-Agent":`Fog-Companion/${app.getVersion()}`,"X-GitHub-Api-Version":"2022-11-28"},redirect:"follow",signal:AbortSignal.timeout(20000)});
-  if(!response.ok)throw new Error(`GitHub ответил ${response.status}`);
-  return response;
+const githubHeaders=()=>({Accept:"application/vnd.github+json","User-Agent":`Fog-Companion/${app.getVersion()}`,"X-GitHub-Api-Version":"2022-11-28"});
+const networkErrorMessage=error=>{const code=error?.cause?.code||error?.code||"";return `${error?.message||String(error)}${code?` (${code})`:""}`};
+async function githubResponse(url,{attempts=4,timeoutMs=30000}={}){
+  let lastError;
+  for(let attempt=1;attempt<=attempts;attempt++){
+    const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),timeoutMs);
+    try{
+      const response=await net.fetch(url,{headers:githubHeaders(),redirect:"follow",signal:controller.signal,bypassCustomProtocolHandlers:true});
+      if(response.ok)return response;
+      const error=new Error(`GitHub ответил ${response.status}`);error.retryable=[408,425,429].includes(response.status)||response.status>=500;
+      if(!error.retryable)throw error;
+      lastError=error;
+    }catch(error){
+      if(error?.retryable===false)throw error;
+      lastError=error;
+      logDiagnostic("warn","update-network-attempt-failed",{url,attempt,attempts,online:typeof net.isOnline==="function"?net.isOnline():null,error:networkErrorMessage(error)});
+    }finally{clearTimeout(timeout)}
+    if(attempt<attempts)await sleep(500*2**(attempt-1));
+  }
+  throw new Error(`Не удалось связаться с GitHub после ${attempts} попыток: ${networkErrorMessage(lastError)}`);
+}
+async function latestReleaseInfo(){
+  try{
+    const release=await (await githubResponse(githubLatestReleaseApi)).json(),latest=String(release?.tag_name||release?.name||"").replace(/^v/i,""),assets=Array.isArray(release?.assets)?release.assets:[],assetName=asset=>String(asset?.name||"").replace(/[._-]+/g," ").replace(/\s+/g," ").trim().toLowerCase(),executable=assets.find(asset=>assetName(asset)==="fog companion exe"),checksum=assets.find(asset=>assetName(asset)==="fog companion exe sha256");
+    if(!latest||!executable?.browser_download_url||!checksum?.browser_download_url)throw new Error("В последнем релизе отсутствуют EXE или SHA-256.");
+    return{latest,downloadUrl:executable.browser_download_url,checksumUrl:checksum.browser_download_url,source:"api"};
+  }catch(apiError){
+    logDiagnostic("warn","update-release-api-fallback",{error:networkErrorMessage(apiError)});
+    const manifest=await (await githubResponse(githubPackageManifest)).json(),latest=String(manifest?.version||"").replace(/^v/i,"");
+    if(!/^\d+\.\d+\.\d+$/.test(latest))throw apiError;
+    const base=`https://github.com/${githubRepository}/releases/download/v${latest}`;
+    return{latest,downloadUrl:`${base}/Fog-Companion.exe`,checksumUrl:`${base}/Fog-Companion.exe.sha256`,source:"manifest"};
+  }
 }
 async function checkForUpdates(manual=false){
   publishUpdateState({status:"checking",message:"Проверяю GitHub Releases…"});
   try{
-    const release=await (await githubResponse(githubLatestReleaseApi)).json(),latest=String(release?.tag_name||release?.name||"").replace(/^v/i,"");
-    const assets=Array.isArray(release?.assets)?release.assets:[],assetName=asset=>String(asset?.name||"").replace(/[._-]+/g," ").replace(/\s+/g," ").trim().toLowerCase(),executable=assets.find(asset=>assetName(asset)==="fog companion exe"),checksum=assets.find(asset=>assetName(asset)==="fog companion exe sha256");
-    if(!latest||!executable?.browser_download_url||!checksum?.browser_download_url)throw new Error("В последнем релизе отсутствуют EXE или SHA-256.");
+    const {latest,downloadUrl,checksumUrl,source}=await latestReleaseInfo();
+    logDiagnostic("info","update-check-complete",{currentVersion:app.getVersion(),latestVersion:latest,source});
     if(!isNewerVersion(latest,app.getVersion()))return publishUpdateState({status:"current",latestVersion:latest,message:`Установлена актуальная версия ${app.getVersion()}.`,downloadUrl:"",checksumUrl:""});
-    const state=publishUpdateState({status:"available",latestVersion:latest,message:`Доступна версия ${latest}.`,downloadUrl:executable.browser_download_url,checksumUrl:checksum.browser_download_url});
+    logDiagnostic("info","update-available",{currentVersion:app.getVersion(),latestVersion:latest,source});
+    const state=publishUpdateState({status:"available",latestVersion:latest,message:`Доступна версия ${latest}.`,downloadUrl,checksumUrl});
     if(!manual)send("update:status",{...state,notify:true});
     return state;
   }catch(error){logDiagnostic("warn","update-check-failed",{error:diagnosticValue(error)});return publishUpdateState({status:"error",message:`Не удалось проверить обновления: ${error.message}`,downloadUrl:"",checksumUrl:""})}
@@ -470,7 +535,7 @@ function createTray(){
   tray.setContextMenu(Menu.buildFromTemplate([
     {label:"Открыть Fog Companion",click:showMainWindow},
     {label:"Показать или скрыть оверлей",accelerator:"Shift+F2",click:()=>toggleOverlay()},
-    {label:"Открыть папку с логами",click:async()=>{fs.mkdirSync(diagnosticsDir,{recursive:true});const error=await shell.openPath(diagnosticsDir);if(error)logDiagnostic("error","open-diagnostics-failed",{error})}},
+    {label:"Открыть папку с логами",click:()=>openDiagnosticsFolder().catch(()=>{})},
     {type:"separator"},
     {label:"Выйти полностью",click:()=>{logDiagnostic("info","tray-exit-requested");app.isQuitting=true;app.quit();}}
   ]));
@@ -682,15 +747,18 @@ function gameRunning() {
   return new Promise(resolve=>execFile("powershell.exe",["-NoProfile","-Command","if(Get-Process -ErrorAction SilentlyContinue | Where-Object {$_.ProcessName -match 'DeadByDaylight'}){'yes'}else{'no'}"],{windowsHide:true},(_e,out)=>resolve(out.trim()==="yes")));
 }
 async function waitForGame(timeoutMs=180000) { const end=Date.now()+timeoutMs; while(Date.now()<end){if(await gameRunning())return true;await sleep(3000);}return false; }
-function helperPath(){return app.isPackaged?path.join(process.resourcesPath,"input-helper.ps1"):path.join(__dirname,"input-helper.ps1");}
 function runHelper(points){return new Promise((resolve,reject)=>{
-  const startedAt=Date.now();logDiagnostic("info","selection-helper-started");
-  const args=["-NoProfile","-ExecutionPolicy","Bypass","-File",helperPath(),"-OpenX",String(points.open.x),"-OpenY",String(points.open.y),"-SearchX",String(points.search.x),"-SearchY",String(points.search.y),"-ResultX",String(points.result.x),"-ResultY",String(points.result.y)];
-  const child=spawn("powershell.exe",args,{windowsHide:true});let err="";child.stderr.on("data",d=>err+=d.toString());child.on("error",error=>{writeCrashReport("selection-helper-spawn-error",error);reject(error)});child.on("exit",code=>{logDiagnostic(code===0?"info":"error","selection-helper-exit",{code,durationMs:Date.now()-startedAt,stderr:err.trim()});code===0?resolve():reject(new Error(err||`Код ${code}`))});
+  const startedAt=Date.now(),scriptPath=ensureInputHelper();logDiagnostic("info","selection-helper-started",{scriptPath});
+  const args=["-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",scriptPath,"-OpenX",String(points.open.x),"-OpenY",String(points.open.y),"-SearchX",String(points.search.x),"-SearchY",String(points.search.y),"-ResultX",String(points.result.x),"-ResultY",String(points.result.y)];
+  const child=spawn("powershell.exe",args,{windowsHide:true,stdio:["ignore","pipe","pipe"]}),stdout=[],stderr=[];let settled=false;
+  child.stdout.on("data",chunk=>stdout.push(Buffer.from(chunk)));child.stderr.on("data",chunk=>stderr.push(Buffer.from(chunk)));
+  child.on("error",error=>{if(settled)return;settled=true;writeCrashReport("selection-helper-spawn-error",error,{scriptPath});reject(error)});
+  child.on("exit",code=>{if(settled)return;settled=true;const out=decodePowerShellOutput(stdout),err=decodePowerShellOutput(stderr);logDiagnostic(code===0?"info":"error","selection-helper-exit",{code,durationMs:Date.now()-startedAt,stdout:out,stderr:err,scriptPath});code===0?resolve():reject(new Error(err||out||`PowerShell завершился с кодом ${code}`))});
 });}
 
 app.whenReady().then(()=>{
   app.setAppUserModelId("local.fogcompanion.desktop");
+  try{ensureInputHelper()}catch(error){logDiagnostic("error","selection-helper-prepare-failed",{error:diagnosticValue(error)})}
   store=loadStore();createMainWindow();createOverlayWindow();createTray();
   setTimeout(()=>refreshStoredProfileAvatar(),900);
   if(process.argv.includes("--sync-once")){setTimeout(()=>openStatsSync(true),1000);setTimeout(()=>app.exit(2),45000);}
@@ -708,6 +776,7 @@ app.whenReady().then(()=>{
   ipcMain.handle("update:get-status",()=>updateState);
   ipcMain.handle("update:check",()=>checkForUpdates(true));
   ipcMain.handle("update:install",()=>installAvailableUpdate());
+  ipcMain.handle("diagnostics:open",()=>openDiagnosticsFolder());
   ipcMain.handle("calibration:capture",async(_e,kind)=>{mainWindow.hide();await sleep(3500);const point=screen.getCursorScreenPoint();mainWindow.show();mainWindow.maximize();mainWindow.focus();return{kind,point};});
   ipcMain.handle("game:select",async(_e,payload)=>{
     const {killer,openPoint,searchPoint,resultPoint}=payload||{};
@@ -717,7 +786,7 @@ app.whenReady().then(()=>{
     if(!running){send("game:selection-status",{type:"info",message:"Запускаю Dead by Daylight через Steam…"});await shell.openExternal("steam://rungameid/381210");running=await waitForGame();if(!running)throw new Error("Игра не запустилась за 3 минуты.");send("game:selection-status",{type:"info",message:"Игра запущена. Жду загрузку лобби…"});await sleep(35000);}
     const oldClipboard=clipboard.readText();clipboard.writeText(killer.search||killer.name);if(overlayWindow&&!overlayWindow.isDestroyed())overlayWindow.hide();await sleep(25);
     try{await runHelper({open:openPoint,search:searchPoint,result:resultPoint});logDiagnostic("info","killer-selection-complete",{killer:killer.name});return true;}
-    catch(error){writeCrashReport("killer-selection-failed",error,{killer:killer.name});throw error;}
+    catch(error){const report=writeCrashReport("killer-selection-failed",error,{killer:killer.name});const visibleError=new Error("Автовыбор не сработал. Отчёт сохранён — откройте Настройки → Диагностика → Открыть папку с логами.");visibleError.report=report;throw visibleError;}
     finally{clipboard.writeText(oldClipboard);}
   });
   ipcMain.on("overlay:hide",()=>{if(overlayWindow&&!overlayWindow.isDestroyed())overlayWindow.hide();});

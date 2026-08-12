@@ -7,6 +7,10 @@ param(
   [Parameter(Mandatory=$true)][int]$ResultY
 )
 
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+[Console]::OutputEncoding = $utf8
+$OutputEncoding = $utf8
+
 $signature = @"
 using System;
 using System.Runtime.InteropServices;

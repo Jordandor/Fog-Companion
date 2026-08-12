@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("fogAPI", {
   getUpdateStatus: () => ipcRenderer.invoke("update:get-status"),
   checkForUpdates: () => ipcRenderer.invoke("update:check"),
   installUpdate: () => ipcRenderer.invoke("update:install"),
+  openDiagnostics: () => ipcRenderer.invoke("diagnostics:open"),
   capturePoint: kind => ipcRenderer.invoke("calibration:capture", kind),
   selectKiller: payload => ipcRenderer.invoke("game:select", payload),
   minimize: () => ipcRenderer.send("window:minimize"),
