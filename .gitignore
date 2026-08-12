@@ -1,0 +1,35 @@
+# Dependencies and build output
+node_modules/
+dist/
+outputs/
+
+# Local user data, diagnostics, captures and imported tracker content
+companion-data.json
+diagnostics/
+qa-*/
+tmp/
+site-js/
+stats-inspection.json
+*-qa.png
+*-qa.json
+qa-*.png
+qa-*.json
+qa-*.js
+build-*.log
+
+# Electron/OS/editor state
+*.dmp
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key

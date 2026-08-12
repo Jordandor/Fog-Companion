@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Fog Companion Overlay</title>
+  <link rel="stylesheet" href="overlay.css">
+  <link rel="stylesheet" href="overlay-readability.css">
+</head>
+<body>
+  <main class="overlay-shell">
+    <header class="overlay-titlebar">
+      <div class="overlay-brand"><img class="overlay-brand-emblem" src="assets/fog-companion-emblem.png" alt=""><div><b>FOG COMPANION</b><small>DBD OVERLAY</small></div></div>
+      <button id="closeOverlay" aria-label="Скрыть оверлей">×</button>
+    </header>
+
+    <section class="overlay-content">
+      <div class="game-state"><i></i> Dead by Daylight запущен</div>
+      <div class="wheel-stage">
+        <div class="wheel-pointer"></div>
+        <canvas id="overlayWheel" width="760" height="760"></canvas>
+        <button id="overlaySpin" class="wheel-core">КРУТИТЬ<small>SPACE</small></button>
+      </div>
+      <div class="result-panel">
+        <span>СУЩНОСТЬ ВЫБИРАЕТ</span>
+        <strong id="overlayResult">Крути колесо</strong>
+        <p id="overlayStatus">Выпавшего убийцу можно выбрать в DBD автоматически.</p>
+      </div>
+      <div class="overlay-actions">
+        <button id="overlayPick" disabled>Выбрать в DBD</button>
+        <button id="overlayAgain" disabled>Еще раз</button>
+      </div>
+      <div class="overlay-hint">Скрыть оверлей: <kbd>Shift</kbd><span>+</span><kbd>F2</kbd></div>
+    </section>
+  </main>
+  <script src="killers.js"></script>
+  <script src="overlay.js"></script>
+</body>
+</html>

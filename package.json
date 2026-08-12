@@ -1,0 +1,52 @@
+{
+  "name": "fog-companion",
+  "version": "0.1.29",
+  "description": "Fog Companion for Dead by Daylight",
+  "main": "main.js",
+  "author": "Codex",
+  "license": "MIT",
+  "packageManager": "pnpm@11.16.0",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable --x64"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "local.fogcompanion.desktop",
+    "productName": "Fog Companion",
+    "artifactName": "Fog Companion.${ext}",
+    "asar": true,
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "overlay.html",
+      "styles.css",
+      "theme.css",
+      "overlay.css",
+      "overlay-readability.css",
+      "app.js",
+      "overlay.js",
+      "killers.js",
+      "assets/fog-companion.png",
+      "assets/fog-companion.ico",
+      "assets/fog-companion-emblem.png",
+      "assets/dbd-tally.png",
+      "assets/quote-corner-top-left.webp",
+      "assets/quote-corner-bottom-right.webp"
+    ],
+    "extraResources": [
+      {
+        "from": "input-helper.ps1",
+        "to": "input-helper.ps1"
+      }
+    ],
+    "win": {
+      "icon": "assets/fog-companion.ico",
+      "target": "portable"
+    }
+  }
+}

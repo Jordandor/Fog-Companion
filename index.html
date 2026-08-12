@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Fog Companion</title><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="theme.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="titlebar">
+      <div class="logo"><img class="app-brand-emblem" src="assets/fog-companion-emblem.png" alt=""><div><b>FOG</b><strong>COMPANION</strong></div><em>PREVIEW</em></div>
+      <div class="title-actions"><button id="minimize">—</button><button id="maximize">□</button><button id="close">×</button></div>
+    </header>
+    <nav class="nav-bar">
+      <div class="profile-chip"><span class="avatar"><img id="navAvatarImage" alt=""><i id="navAvatarInitial">И</i></span><b id="navProfileName">Игрок</b><small id="navProfilePlatform">STEAM</small></div>
+      <div class="nav-links">
+        <button class="nav-link active" data-page="overview">Обзор</button>
+        <button class="nav-link" data-page="history">История матчей</button>
+        <button class="nav-link" data-page="killers">Персонажи</button>
+        <button class="nav-link" data-page="settings">Настройки</button>
+      </div>
+      <div class="nav-tools"><span id="gameIndicator" class="game-indicator"><i></i> DBD не запущен</span><button id="syncButton" class="sync-button">↻ Синхронизировать</button></div>
+    </nav>
+
+    <main id="overviewPage" class="page active">
+      <section class="profile-column">
+        <div class="profile-card">
+          <div class="big-avatar"><img id="profileAvatarImage" alt=""><i id="profileAvatarInitial">И</i></div><h2 id="profileName">Игрок</h2><p id="profileRoleLabel">Общий профиль</p>
+          <div id="demoBadge" class="demo-badge">ДЕМОНСТРАЦИОННЫЕ ДАННЫЕ</div>
+          <div class="profile-divider"></div>
+          <div class="rank-line"><span>Матчей в архиве</span><b id="profileMatches">0</b></div>
+          <div class="rank-line"><span id="profileRateLabel">Результативность</span><b id="profileAverage">0.0</b></div>
+          <div class="rank-line"><span>Любимый персонаж</span><b id="profileFavorite">—</b></div>
+        </div>
+        <div class="small-chart-card results-chart-card">
+          <div class="chart-card-head"><div><div class="section-label">РЕЗУЛЬТАТЫ МАТЧЕЙ</div><small id="chartPeriodLabel">Убийцы и выжившие за 30 дней</small></div><button id="chartInfo" aria-label="Как читать график">?</button></div>
+          <div id="sparkline" class="sparkline" aria-label="Результаты матчей за последние 30 дней"></div>
+          <div id="chartTooltip" class="chart-tooltip">Наведи на столбец, чтобы увидеть матч</div>
+          <div class="chart-legend"><span><i class="killer-dot"></i> убийства из 4</span><span><i class="survivor-dot"></i> побег</span></div>
+          <button id="chartOpenHistory" class="chart-history-button">Открыть историю</button>
+        </div>
+        <div class="privacy-card"><b>Локальный архив</b><p>История хранится на этом компьютере. Токен Behaviour не копируется в базу приложения.</p></div>
+      </section>
+
+      <section class="content-column">
+        <div class="page-heading"><div><span class="eyebrow" id="overviewRoleEyebrow">ОБЩИЙ ПРОФИЛЬ</span><h1>Обзор сессии</h1></div><div class="period-switch role-switch"><button class="active" data-role="all">Все</button><button data-role="killer">Убийца</button><button data-role="survivor">Выживший</button></div></div>
+        <div id="summaryCards" class="summary-grid"></div>
+        <div class="section-heading"><div><span class="eyebrow">НЕДАВНЯЯ АКТИВНОСТЬ</span><h2>Последние матчи</h2></div><button id="showAllHistory" class="text-action">Смотреть всю историю →</button></div>
+        <div id="recentMatches" class="matches-list"></div>
+      </section>
+
+      <aside class="right-column">
+        <div class="wheel-promo">
+          <button class="mini-wheel" id="miniWheel" aria-label="Открыть колесо убийц"><span class="mini-wheel-logo" aria-hidden="true"></span></button><span class="eyebrow">СУЩНОСТЬ РЕШАЕТ</span><h2>Случайный убийца</h2><p>Прокрути колесо, запусти DBD и автоматически выбери персонажа.</p><button id="openWheel">Открыть рандомайзер</button>
+        </div>
+        <div class="session-card"><div class="section-label">ЭФФЕКТИВНОСТЬ</div><div id="efficiencyRows"></div></div>
+        <div class="sync-card"><span>Официальный источник</span><b>DBD Stats Tracker</b><p id="lastSyncLabel">Еще не синхронизировано</p><small class="auto-sync-label">Автообновление: при запуске и каждую минуту</small><button id="syncSideButton">Подключить Behaviour Account</button></div>
+      </aside>
+    </main>
+
+    <main id="historyPage" class="page wide-page">
+      <div class="page-heading history-page-heading"><div><button id="historyBack" class="page-back-button" type="button" aria-label="Вернуться к обзору"><span aria-hidden="true">←</span> Назад к обзору</button><span class="eyebrow">ЛОКАЛЬНЫЙ АРХИВ</span><h1>История матчей</h1></div><div class="history-filters"><input id="historySearch" placeholder="Поиск по персонажу или карте"><button class="active" data-history-role="all">Все</button><button data-history-role="killer">Убийца</button><button data-history-role="survivor">Выживший</button></div></div>
+      <div id="historyMatches" class="matches-list history-list"></div>
+    </main>
+
+    <main id="killersPage" class="page wide-page">
+      <div class="page-heading"><div><span class="eyebrow">ОФИЦИАЛЬНАЯ СТАТИСТИКА</span><h1>Статистика персонажей</h1><p id="characterStatsMeta" class="page-subtitle">Загружается вместе с историей матчей</p></div><div class="character-toolbar"><div class="period-switch character-switch"><button class="active" data-character-role="all">Все</button><button data-character-role="killer">Убийцы</button><button data-character-role="survivor">Выжившие</button></div><div class="period-switch character-timeframe-switch"><button data-character-timeframe="30-days">30 дней</button><button class="active" data-character-timeframe="all-time">Все время</button></div></div></div>
+      <div id="killerStats" class="character-stats-root"></div>
+    </main>
+
+    <main id="settingsPage" class="page wide-page settings-page">
+      <div class="page-heading"><div><span class="eyebrow">ПАРАМЕТРЫ</span><h1>Настройки Companion</h1></div></div>
+      <div class="settings-grid">
+        <section class="settings-panel"><h2>Синхронизация матчей</h2><p>Вход происходит в официальном окне Behaviour. Companion обновляет историю при запуске, при показе через Shift+F2 и каждую минуту. В базу сохраняется только отображаемая история.</p><button class="red-button" id="settingsSync">Открыть DBD Stats Tracker</button></section>
+        <section class="settings-panel"><h2>Автовыбор убийцы</h2><p>Задайте три экранные точки. После кнопки у вас будет 3,5 секунды, чтобы навести курсор.</p>
+          <button class="point-button" data-point="open"><span>1</span><div><b>Кнопка списка убийц</b><small id="openPointLabel">не задано</small></div></button>
+          <button class="point-button" data-point="search"><span>2</span><div><b>Поле поиска персонажей</b><small id="searchPointLabel">не задано</small></div></button>
+          <button class="point-button" data-point="result"><span>3</span><div><b>Первая карточка результата</b><small id="resultPointLabel">не задано</small></div></button>
+          <label class="toggle-row"><input id="automationToggle" type="checkbox"><span><b>Автоматический выбор</b><small>После выпадения Companion переключится в DBD и выберет персонажа.</small></span></label>
+        </section>
+        <section class="settings-panel"><h2>Горячая клавиша</h2><div class="hotkey-display"><kbd>Shift</kbd><span>+</span><kbd>F2</kbd></div><p>Показать или скрыть компактный оверлей во время работы DBD. Большое окно Companion остается открытым.</p></section>
+        <section class="settings-panel update-panel"><h2>Обновления</h2><p id="updateStatusText">Проверяю актуальную версию…</p><small id="updateVersionText">Текущая версия</small><button class="red-button" id="updateButton">Проверить обновления</button></section>
+      </div>
+    </main>
+
+    <div id="matchModal" class="modal"><div class="modal-backdrop" data-close="match"></div><section class="match-detail"><header><div><span class="eyebrow">ПОДРОБНОСТИ МАТЧА</span><h2 id="detailTitle">Матч</h2></div><button data-close="match">×</button></header><div id="detailMap" class="detail-map"></div><div id="detailSummary" class="detail-summary"></div><div class="scoreboard"><div class="score-head"><span>Игрок</span><span>Результат</span><span>Перки · предмет/сила · аддоны · подношение</span><span>Очки</span></div><div id="scoreRows"></div></div></section></div>
+
+    <div id="charactersModal" class="modal"><div class="modal-backdrop" data-close="characters"></div><section class="characters-dialog"><header><div><span class="eyebrow">ОФИЦИАЛЬНАЯ СТАТИСТИКА</span><h2 id="charactersModalTitle">Все персонажи</h2></div><button data-close="characters">×</button></header><div class="characters-table-head"><span>Персонаж</span><span>Часы</span><span>Частота выборов</span><span id="charactersRateHead">Результативность</span></div><div id="charactersTable" class="characters-table"></div></section></div>
+
+    <div id="characterDetailModal" class="modal"><div class="modal-backdrop" data-close="character-detail"></div><section class="character-detail-dialog"><header><div><span class="eyebrow" id="characterDetailRole">ПЕРСОНАЖ</span><h2 id="characterDetailName">Персонаж</h2></div><button data-close="character-detail">×</button></header><div class="character-detail-body"><div class="character-detail-portrait"><img id="characterDetailImage" alt=""></div><div id="characterDetailStats" class="character-detail-stats"></div></div></section></div>
+
+    <div id="perkModal" class="modal"><div class="modal-backdrop" data-close="perk"></div><section class="perk-detail"><header><div><span class="eyebrow" id="perkDetailKind">ОПИСАНИЕ НАВЫКА</span><h2 id="perkDetailTitle">Навык</h2></div><button data-close="perk">×</button></header><div class="perk-detail-body"><aside class="perk-detail-aside"><div class="perk-detail-icon"><img id="perkDetailImage" alt=""></div><blockquote id="perkDetailQuote" hidden></blockquote></aside><div class="perk-detail-copy"><p id="perkDetailStatus">Загрузка описания…</p><section id="perkDescriptionSection" class="detail-copy-section"><h3>Описание:</h3><div id="perkDetailDescription"></div><div id="perkCharacteristicsSection" class="detail-description-points" hidden><ul id="perkDetailCharacteristics"></ul></div></section><section id="perkFeaturesSection" class="detail-copy-section" hidden><h3>Особенности:</h3><div id="perkFeaturesLead"></div><ul id="perkDetailFeatures"></ul></section><button id="perkRetryButton" class="ghost-button" hidden>Повторить загрузку</button><button id="perkSourceButton" class="ghost-button" hidden>Открыть источник</button></div></div></section></div>
+
+    <div id="wheelModal" class="modal"><div class="modal-backdrop" data-close="wheel"></div><section class="wheel-dialog"><header><div><span class="eyebrow">СУЩНОСТЬ РЕШАЕТ</span><h2>Рандомайзер убийцы</h2></div><button data-close="wheel">×</button></header><div class="wheel-layout"><div class="wheel-stage"><div class="wheel-pointer"></div><canvas id="wheelCanvas" width="900" height="900"></canvas><button id="spinWheel" class="wheel-core">КРУТИТЬ<small>SPACE</small></button></div><div class="wheel-result"><div id="wheelResultPortrait" class="wheel-result-portrait mystery"><span>?</span><img id="wheelResultImage" alt=""></div><span>В ТУМАН ИДЕТ</span><strong id="wheelResultName">Крути колесо</strong><p id="wheelStatus">После выпадения можно автоматически открыть DBD и выбрать убийцу.</p><button id="pickInGame" disabled>Выбрать и открыть DBD</button><button id="spinAgain" class="ghost-button" disabled>Еще раз</button></div></div></section></div>
+
+    <div id="toast" class="toast"></div>
+  </div>
+  <script src="killers.js"></script><script src="app.js"></script>
+</body>
+</html>

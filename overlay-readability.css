@@ -1,0 +1,20 @@
+.overlay-brand b { font-size: 13px; }
+.overlay-brand small { font-size: 9px; }
+.game-state { font-size: 11px; }
+.wheel-core { font-size: 13px; }
+.wheel-core small { font-size: 9px; }
+.result-panel > span { font-size: 9px; }
+.result-panel strong { font-size: 26px; }
+.result-panel p { font-size: 11px; }
+.overlay-actions button { font-size: 11px; }
+.overlay-hint { font-size: 9px; }
+.overlay-result-portrait { position: relative; width: 82px; height: 88px; margin: 0 auto 8px; overflow: hidden; border: 1px solid rgba(198,23,33,.38); border-radius: 7px; background: radial-gradient(circle at 50% 32%,#38333a,#111216 72%); }
+.overlay-result-portrait img { width: 100%; height: 100%; object-fit: cover; object-position: center top; }
+.overlay-result-portrait span { position: absolute; z-index: 1; inset: 0; display: grid; place-items: center; color: rgba(239,233,229,.67); font-family: Georgia,serif; font-size: 48px; }
+.overlay-result-portrait:not(.mystery) span { display: none; }
+.overlay-result-portrait.portrait-error span { display: grid; font-size: 34px; }
+.overlay-result-portrait.mystery { filter: blur(1px) saturate(.4); }
+.overlay-result-portrait.mystery img { display: none; }
+
+/* The compact Shift+F2 overlay uses the same transparent emblem as the main window. */
+.overlay-brand-emblem { display:block; width:38px; height:38px; flex:none; object-fit:contain; opacity:.97; filter:drop-shadow(0 0 6px rgba(198,43,52,.48)); }
