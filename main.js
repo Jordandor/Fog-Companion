@@ -61,7 +61,7 @@ async function checkForUpdates(manual=false){
   publishUpdateState({status:"checking",message:"Проверяю GitHub Releases…"});
   try{
     const release=await (await githubResponse(githubLatestReleaseApi)).json(),latest=String(release?.tag_name||release?.name||"").replace(/^v/i,"");
-    const assets=Array.isArray(release?.assets)?release.assets:[],executable=assets.find(asset=>asset?.name==="Fog Companion.exe"),checksum=assets.find(asset=>asset?.name==="Fog Companion.exe.sha256");
+    const assets=Array.isArray(release?.assets)?release.assets:[],assetName=asset=>String(asset?.name||"").replace(/[._-]+/g," ").replace(/\s+/g," ").trim().toLowerCase(),executable=assets.find(asset=>assetName(asset)==="fog companion exe"),checksum=assets.find(asset=>assetName(asset)==="fog companion exe sha256");
     if(!latest||!executable?.browser_download_url||!checksum?.browser_download_url)throw new Error("В последнем релизе отсутствуют EXE или SHA-256.");
     if(!isNewerVersion(latest,app.getVersion()))return publishUpdateState({status:"current",latestVersion:latest,message:`Установлена актуальная версия ${app.getVersion()}.`,downloadUrl:"",checksumUrl:""});
     const state=publishUpdateState({status:"available",latestVersion:latest,message:`Доступна версия ${latest}.`,downloadUrl:executable.browser_download_url,checksumUrl:checksum.browser_download_url});
