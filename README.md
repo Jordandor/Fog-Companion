@@ -1,6 +1,6 @@
 # Fog Companion
 
-Локальное Windows-приложение для Dead by Daylight в формате игрового Companion.
+Локальное Windows-приложение для Dead by Daylight.
 
 ## Возможности
 
