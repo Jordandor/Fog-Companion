@@ -444,6 +444,92 @@
 .score-row.is-self::before { content: ""; position: absolute; z-index: 0; inset: 0; border-left: 3px solid #d82832; background: linear-gradient(90deg,rgba(168,25,34,.28),rgba(168,25,34,.09) 38%,transparent 78%); pointer-events: none; }
 .you-badge { display: inline-block; margin-left: 7px; padding: 2px 5px; border: 1px solid rgba(216,40,50,.44); border-radius: 3px; background: rgba(151,24,31,.34); color: #ef969b; font-size: 8px; font-style: normal; letter-spacing: .08em; vertical-align: 1px; }
 
+/* 2v8 has its own compact card: map first, eight survivors in a 4x2 party grid. */
+.match-card.is-two-v-eight {
+  grid-template-columns: 210px 96px 120px minmax(100px,1fr) 180px 60px;
+  grid-template-areas: "identity mode map main survivors score";
+  column-gap: 8px;
+  min-height: 124px;
+}
+.match-card.is-two-v-eight .killer-identity { grid-area: identity; }
+.match-card.is-two-v-eight .match-mode-cell { grid-area: mode; }
+.match-card.is-two-v-eight .two-v-eight-map { grid-area: map; min-width: 0; align-self: center; }
+.match-card.is-two-v-eight .match-main { grid-area: main; align-self: center; }
+.match-card.is-two-v-eight .survivor-stack { grid-area: survivors; }
+.match-card.is-two-v-eight .match-score { grid-area: score; }
+.match-card.is-two-v-eight .map-preview { display:block; width: 116px; height: 54px; }
+.match-card.is-two-v-eight .map-preview.no-image { display:flex; align-items:center; justify-content:center; padding:6px; background:radial-gradient(circle at 50% 35%,rgba(86,25,31,.3),rgba(10,10,12,.98) 72%); }
+.match-card.is-two-v-eight .map-preview.no-image span { position:static; max-width:100%; padding:0; background:none; font-size:9px; line-height:1.25; text-align:center; white-space:normal; }
+.two-v-eight-map-timing { width: 116px; display: flex; align-items: center; justify-content: space-between; gap: 5px; margin-top: 6px; color: #68646a; line-height: 1.15; white-space: nowrap; }
+.two-v-eight-map-timing b { color: #aaa4a7; font-size: 10px; }
+.two-v-eight-map-timing span { overflow: hidden; font-size: 8px; text-overflow: ellipsis; }
+.two-v-eight-map-compact { display: none; min-width: 0; }
+.two-v-eight-map-compact b,.two-v-eight-map-compact span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.two-v-eight-map-compact b { color: #ddd7d3; font-size: 11px; }
+.two-v-eight-map-compact span { margin-top: 5px; color: #6f6a70; font-size: 9px; }
+.match-card.is-two-v-eight .result-line { min-height: 29px; align-items: center; }
+.match-card.is-two-v-eight .result-pill { width: 100%; min-height: 29px; display: flex; align-items: center; justify-content: center; text-align: center; line-height: 1.3; }
+.match-card.is-two-v-eight .survivor-stack { grid-template-columns: repeat(4,42px); grid-template-rows: repeat(2,42px); gap: 4px; }
+#recentMatches .match-card.is-two-v-eight { grid-template-columns: 210px 96px 120px minmax(100px,1fr) 180px 60px; }
+#recentMatches .match-card.is-two-v-eight .survivor-stack { grid-template-columns: repeat(4,42px); grid-template-rows: repeat(2,42px); gap: 4px; }
+#recentMatches .match-card.is-two-v-eight .survivor { width:42px; height:42px; }
+.survivor.survivor-empty { border-style: dashed; color: #59565c; background: rgba(255,255,255,.018); }
+.survivor.survivor-empty span { font-family: Georgia,serif; font-size: 15px; }
+.two-v-eight-class-row { min-height: 34px; margin-top: 8px; }
+.match-character-class { max-width: 100%; display: flex; align-items: center; gap: 7px; overflow: hidden; padding: 3px 8px 3px 4px; border: 1px solid rgba(95,125,137,.28); border-radius: 5px; background: linear-gradient(90deg,rgba(38,69,80,.3),rgba(15,16,19,.84)); color: #aaaeb0; cursor: pointer; }
+.match-character-class img { flex: 0 0 auto; width: 28px; height: 28px; object-fit: contain; }
+.match-character-class span { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.match-character-class:hover { border-color: rgba(198,23,33,.52); color: #ece7e4; filter: brightness(1.12); }
+.match-class-missing { align-self:center; color:#68646a; font-size:9px; }
+.score-class-loadout { gap: 11px; }
+.equipment-slot.character-class { width: 44px; height: 44px; border-color: rgba(95,125,137,.42); background: radial-gradient(circle,rgba(39,81,91,.46),rgba(12,12,14,.96)); }
+.score-class-name { color: #ddd8d5; font-size: 12px; font-weight: 700; }
+.score-class-missing { color: #68646a; font-size: 10px; }
+
+@media(max-width:1450px){
+  .match-card.is-two-v-eight { grid-template-columns:190px 88px 112px minmax(126px,1fr) 164px; }
+  .match-card.is-two-v-eight { grid-template-areas:"identity mode map main survivors"; }
+  #recentMatches .match-card.is-two-v-eight { grid-template-columns:190px 88px 112px minmax(126px,1fr) 164px; }
+  .match-card.is-two-v-eight .match-score { display:none; }
+  .match-card.is-two-v-eight .survivor-stack { grid-template-columns:repeat(4,38px); grid-template-rows:repeat(2,38px); gap:4px; }
+  #recentMatches .match-card.is-two-v-eight .survivor-stack { grid-template-columns:repeat(4,38px); grid-template-rows:repeat(2,38px); gap:4px; }
+  #recentMatches .match-card.is-two-v-eight .survivor { width:38px; height:38px; }
+  .match-card.is-two-v-eight .map-preview,.match-card.is-two-v-eight .two-v-eight-map-timing { width:104px; }
+  .history-list .match-card.is-two-v-eight { grid-template-columns:220px 105px 126px minmax(150px,1fr) 199px 64px; }
+  .history-list .match-card.is-two-v-eight { grid-template-areas:"identity mode map main survivors score"; }
+  .history-list .match-card.is-two-v-eight .match-score { display:block; }
+  .history-list .match-card.is-two-v-eight .survivor-stack { grid-template-columns:repeat(4,46px); grid-template-rows:repeat(2,46px); gap:5px; }
+  .history-list .match-card.is-two-v-eight .map-preview,.history-list .match-card.is-two-v-eight .two-v-eight-map-timing { width:116px; }
+}
+
+@container (max-width: 800px) {
+  .match-card.is-two-v-eight,#recentMatches .match-card.is-two-v-eight {
+    grid-template-columns: 190px 88px minmax(0,1fr);
+    grid-template-areas:
+      "identity mode main"
+      "map map survivors";
+    row-gap: 12px;
+    min-height: 164px;
+  }
+  .match-card.is-two-v-eight .two-v-eight-map .map-preview,
+  .match-card.is-two-v-eight .two-v-eight-map-timing { display:none; }
+  .match-card.is-two-v-eight .two-v-eight-map-compact { display:block; }
+  .match-card.is-two-v-eight .survivor-stack { justify-self:end; }
+}
+
+@container (max-width: 520px) {
+  .match-card.is-two-v-eight,#recentMatches .match-card.is-two-v-eight {
+    grid-template-columns: minmax(0,1fr);
+    grid-template-areas:
+      "identity"
+      "mode"
+      "main"
+      "map"
+      "survivors";
+  }
+  .match-card.is-two-v-eight .survivor-stack { justify-self:start; }
+}
+
 /* Killer result portrait. */
 .wheel-result-portrait { position: relative; width: 180px; height: 210px; margin: 0 auto 18px; overflow: hidden; border: 1px solid rgba(198,23,33,.38); border-radius: 9px; background: radial-gradient(circle at 50% 34%,#37323a,#111216 72%); box-shadow: 0 18px 38px rgba(0,0,0,.42); isolation:isolate; }
 .wheel-result-portrait img { width: 100%; height: 100%; object-fit: cover; object-position: center top; transform:scale(1.025); }

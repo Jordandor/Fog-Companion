@@ -617,6 +617,7 @@ function participantFromRaw(raw,index) {
     nickname:raw.nickname||raw.playerName||raw.displayName||(role === "killer" ? "Убийца" : `Выживший ${index+1}`),
     profileUrl:raw.profileUrl||raw.steamProfileUrl||"",
     character:{ id:character.id||"", name:character.name||character.id||"Неизвестно", image:normalizeImage(character.image?.path||character.image||"") },
+    characterClass:normalizeItem(raw.characterClass),
     result,
     score:Number(raw.leaderboardScore||raw.score||0),
     perks:(loadout.perks||[]).map(normalizeItem).filter(Boolean),
