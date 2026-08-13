@@ -16,20 +16,29 @@
 
     <section class="overlay-content">
       <div class="game-state"><i></i> Dead by Daylight запущен</div>
-      <div class="wheel-stage">
-        <div class="wheel-pointer"></div>
-        <canvas id="overlayWheel" width="760" height="760"></canvas>
-        <button id="overlaySpin" class="wheel-core">КРУТИТЬ<small>SPACE</small></button>
-      </div>
-      <div class="result-panel">
-        <span>СУЩНОСТЬ ВЫБИРАЕТ</span>
-        <strong id="overlayResult">Крути колесо</strong>
-        <p id="overlayStatus">Выпавшего убийцу можно выбрать в DBD автоматически.</p>
-      </div>
-      <div class="overlay-actions">
-        <button id="overlayPick" disabled>Выбрать в DBD</button>
-        <button id="overlayAgain" disabled>Еще раз</button>
-      </div>
+      <div class="overlay-tabs"><button class="active" data-overlay-tab="killer">Убийца</button><button data-overlay-tab="perks">Перки</button></div>
+      <section id="overlayKillerPanel">
+        <div class="wheel-stage">
+          <div class="wheel-pointer"></div>
+          <canvas id="overlayWheel" width="760" height="760"></canvas>
+          <button id="overlaySpin" class="wheel-core">КРУТИТЬ<small>SPACE</small></button>
+        </div>
+        <div class="result-panel">
+          <span>СУЩНОСТЬ ВЫБИРАЕТ</span>
+          <strong id="overlayResult">Крути колесо</strong>
+          <p id="overlayStatus">Выпавшего убийцу можно выбрать в DBD автоматически.</p>
+        </div>
+        <div class="overlay-actions">
+          <button id="overlayPick" disabled>Выбрать в DBD</button>
+          <button id="overlayAgain" disabled>Еще раз</button>
+        </div>
+      </section>
+      <section id="overlayPerkPanel" class="overlay-perk-panel" hidden>
+        <div><span>СЛУЧАЙНАЯ СБОРКА</span><strong>ПЕРКИ УБИЙЦЫ</strong><p id="overlayPerkStatus">Откройте экран перков в DBD перед автовыбором.</p></div>
+        <div id="overlayPerkSlots" class="overlay-perk-slots"></div>
+        <button id="overlayRerollPerks">Перекрутить незакрепленные</button>
+        <button id="overlayPickPerks" disabled>Выбрать перки в DBD</button>
+      </section>
       <div class="overlay-hint">Скрыть оверлей: <kbd>Shift</kbd><span>+</span><kbd>F2</kbd></div>
     </section>
   </main>

@@ -1,6 +1,6 @@
 {
   "name": "fog-companion",
-  "version": "0.1.32",
+  "version": "0.1.36",
   "description": "Fog Companion for Dead by Daylight",
   "main": "main.js",
   "author": "Codex",
@@ -31,6 +31,7 @@
       "app.js",
       "overlay.js",
       "killers.js",
+      "!qa-user-data{,/**/*}",
       "assets/fog-companion.png",
       "assets/fog-companion.ico",
       "assets/fog-companion-emblem.png",

@@ -1,7 +1,8 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, screen, clipboard, shell, Tray, Menu, crashReporter, net } = require("electron");
+const { app, BrowserWindow, ipcMain, globalShortcut, screen, clipboard, shell, Tray, Menu, crashReporter, net, session } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const http = require("http");
 const { spawn, execFile } = require("child_process");
 
 const hasSingleInstanceLock=app.requestSingleInstanceLock();
@@ -70,6 +71,8 @@ if(hasSingleInstanceLock){process.on("uncaughtException",error=>{writeCrashRepor
 let mainWindow;
 let overlayWindow;
 let statsWindow;
+let steamAuthWindow;
+let steamAuthPromise;
 let tray;
 let store;
 let lastAutoSyncAttempt=0;
@@ -162,9 +165,11 @@ function defaultData() {
   const now = Math.floor(Date.now()/1000);
   return {
     version:1,
-    profile:{ name:"Игрок", platform:"Steam" },
+    account:null,
+    profile:{ name:"Игрок", platform:"Behaviour" },
     meta:{ demo:true, lastSync:null, source:"demo" },
-    settings:{ automationEnabled:false, openPoint:null, searchPoint:null, resultPoint:null, wheelCooldown:3, wheelCooldowns:{}, enabledKillerIds:[] },
+    settings:{ automationEnabled:false, searchPoint:null, resultPoint:null, perkSlot1Point:null, perkSlot2Point:null, perkSlot3Point:null, perkSlot4Point:null, perkSearchPoint:null, perkResultPoint:null, wheelCooldown:3, enabledKillerIds:null, killerFilterInitialized:false },
+    randomizer:{ killer:null, perks:[], perkLocks:[false,false,false,false], killerHistory:[] },
     matches:[
       { id:"demo-1", startTime:now-3600, duration:812, map:"Поместье Макмиллан", gameType:"1v4", kills:4,
         player:demoParticipant("killer","Кошмар","Безжалостный убийца",32210,["Барбекю и чили","Нокаут","Выхода нет","Секущий крюк"],0),
@@ -203,7 +208,15 @@ function defaultData() {
 }
 
 function loadStore() {
-  try { return refreshMatchKillCounts(JSON.parse(fs.readFileSync(dataFile(), "utf8"))); }
+  try {
+    const value=JSON.parse(fs.readFileSync(dataFile(), "utf8"));
+    if(!Object.hasOwn(value,"account"))value.account=null;
+    if(!value.behaviourProfile&&value.profile)value.behaviourProfile=value.profile;
+    value.settings={...defaultData().settings,...(value.settings||{})};
+    if(!value.settings.killerFilterInitialized&&Array.isArray(value.settings.enabledKillerIds)&&!value.settings.enabledKillerIds.length)value.settings.enabledKillerIds=null;
+    value.randomizer={...defaultData().randomizer,...(value.randomizer||{})};
+    return refreshMatchKillCounts(value);
+  }
   catch { const value=defaultData(); writeStore(value); return value; }
 }
 
@@ -219,9 +232,32 @@ function refreshMatchKillCounts(value){
   for(const match of value.matches||[]){
     if(match.player?.role!=="killer")continue;
     const survivors=[match.player,...(match.participants||[])].filter(person=>person?.role==="survivor");
-    match.kills=survivors.filter(person=>person.result&&!escaped(person)&&!leftTrial(person)).length;
+    match.kills=survivors.filter(person=>person.result&&!escaped(person)).length;
   }
   return value;
+}
+
+function applyAuthenticatedIdentity(value=store){
+  const account=value?.account;
+  if(account?.provider!=="steam"||!account.steamId)return false;
+  const name=String(account.name||"").trim()||`Steam ${String(account.steamId).slice(-6)}`;
+  const profileUrl=String(account.profileUrl||"").trim()||`https://steamcommunity.com/profiles/${account.steamId}`;
+  let changed=false;
+  for(const match of value.matches||[]){
+    const player=match?.player;
+    if(!player)continue;
+    if(!player.trackerNickname&&player.nickname&&player.nickname!==name){
+      player.trackerNickname=player.nickname;
+      changed=true;
+    }
+    const identity={nickname:name,profileUrl,identityProvider:"steam",steamId:String(account.steamId)};
+    for(const [key,next] of Object.entries(identity)){
+      if(player[key]===next)continue;
+      player[key]=next;
+      changed=true;
+    }
+  }
+  return changed;
 }
 
 function writeStore(value) {
@@ -232,6 +268,10 @@ function writeStore(value) {
 }
 
 function send(channel,value) { if(mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel,value); }
+function sendRandomizerState(){
+  if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send("randomizer:updated",store);
+  if(overlayWindow&&!overlayWindow.isDestroyed())overlayWindow.webContents.send("randomizer:updated",store);
+}
 
 async function responseBodyWithRetry(webContents,requestId) {
   let lastError;
@@ -306,6 +346,110 @@ async function aggregateCategoryPayloadFromPage(webContents,matchCategory="Regul
 }
 
 function decodeHtml(value){return String(value||"").replace(/&amp;/g,"&").replace(/&quot;/g,'"').replace(/&#39;/g,"'");}
+const steamOpenIdEndpoint="https://steamcommunity.com/openid/login";
+const steamAuthPartition="persist:fog-companion-steam-auth";
+function xmlValue(xml,tag){
+  const match=String(xml||"").match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`,"i"));
+  return decodeHtml(String(match?.[1]||"").replace(/^<!\[CDATA\[([\s\S]*)\]\]>$/,"$1")).trim();
+}
+async function steamPublicProfile(steamId,fallback={}){
+  const profileUrl=`https://steamcommunity.com/profiles/${steamId}`;
+  try{
+    const response=await net.fetch(`${profileUrl}/?xml=1`,{headers:{"User-Agent":`Fog-Companion/${app.getVersion()}`},redirect:"follow",bypassCustomProtocolHandlers:true});
+    if(!response.ok)throw new Error(`Steam ответил ${response.status}`);
+    const xml=await response.text(),name=xmlValue(xml,"steamID"),avatar=xmlValue(xml,"avatarFull")||xmlValue(xml,"avatarMedium");
+    return{name:name||fallback.name||`Steam ${steamId.slice(-6)}`,avatar:avatar||fallback.avatar||"",profileUrl:fallback.profileUrl||profileUrl};
+  }catch(error){
+    logDiagnostic("warn","steam-profile-load-failed",{steamId,error:diagnosticValue(error)});
+    return{name:fallback.name||`Steam ${steamId.slice(-6)}`,avatar:fallback.avatar||"",profileUrl:fallback.profileUrl||profileUrl};
+  }
+}
+async function verifySteamOpenId(callbackUrl,expectedReturnTo,expectedState){
+  const callback=new URL(callbackUrl);
+  if(callback.searchParams.get("state")!==expectedState)throw new Error("Steam вернул неверный идентификатор сеанса.");
+  if(callback.searchParams.get("openid.mode")==="cancel")throw new Error("Вход через Steam отменён.");
+  if(callback.searchParams.get("openid.mode")!=="id_res")throw new Error("Steam не подтвердил вход.");
+  if(callback.searchParams.get("openid.return_to")!==expectedReturnTo)throw new Error("Steam вернул неверный адрес подтверждения.");
+  const verification=new URLSearchParams();
+  for(const [key,value] of callback.searchParams)if(key.startsWith("openid."))verification.set(key,value);
+  verification.set("openid.mode","check_authentication");
+  const response=await net.fetch(steamOpenIdEndpoint,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded","User-Agent":`Fog-Companion/${app.getVersion()}`},body:verification.toString(),bypassCustomProtocolHandlers:true});
+  if(!response.ok)throw new Error(`Steam не подтвердил подпись: HTTP ${response.status}.`);
+  const answer=await response.text();
+  if(!/(?:^|\n)is_valid\s*:\s*true(?:\r?$|\n)/im.test(answer))throw new Error("Подпись Steam OpenID недействительна.");
+  const claimed=callback.searchParams.get("openid.claimed_id")||"",match=claimed.match(/^https?:\/\/steamcommunity\.com\/openid\/id\/(\d{17})$/i);
+  if(!match)throw new Error("Steam не вернул корректный SteamID.");
+  return match[1];
+}
+function createSteamAuthFlow(){
+  return new Promise((resolve,reject)=>{
+    const authState=crypto.randomBytes(24).toString("hex");
+    let settled=false,verifying=false,callbackServer=null,returnTo="",callbackOrigin="";
+    const finish=(error,value)=>{
+      if(settled)return;settled=true;
+      if(callbackServer){callbackServer.close();callbackServer=null}
+      if(steamAuthWindow&&!steamAuthWindow.isDestroyed())steamAuthWindow.close();steamAuthWindow=null;
+      error?reject(error):resolve(value);
+    };
+    const timer=setTimeout(()=>finish(new Error("Время ожидания входа через Steam истекло.")),5*60*1000);
+    const complete=async target=>{
+      if(verifying)return;verifying=true;send("auth:status",{type:"info",message:"Проверяю подпись Steam…"});
+      try{
+        const steamId=await verifySteamOpenId(target,returnTo,authState),publicProfile=await steamPublicProfile(steamId);
+        store.account={provider:"steam",steamId,name:publicProfile.name,avatar:publicProfile.avatar,profileUrl:publicProfile.profileUrl,authenticatedAt:Date.now()};
+        applyAuthenticatedIdentity(store);
+        writeStore(store);logDiagnostic("info","steam-auth-complete",{steamId});send("sync:status",{type:"success",message:`Выполнен вход через Steam: ${publicProfile.name}`,data:store});clearTimeout(timer);finish(null,store);
+      }catch(error){logDiagnostic("warn","steam-auth-failed",{error:diagnosticValue(error)});clearTimeout(timer);finish(error)}
+    };
+    const handleNavigation=(event,target)=>{
+      let url;try{url=new URL(target)}catch{return}
+      if(url.origin===callbackOrigin&&url.pathname==="/steam/callback")return;
+      if(url.protocol!=="https:"||url.hostname!=="steamcommunity.com"){event.preventDefault();logDiagnostic("warn","steam-auth-navigation-blocked",{target})}
+    };
+    callbackServer=http.createServer((request,response)=>{
+      const chunks=[];
+      request.on("data",chunk=>chunks.push(chunk));
+      request.on("end",()=>{
+        let callback;
+        try{callback=new URL(request.url,callbackOrigin)}catch{response.writeHead(400);response.end();return}
+        if(callback.pathname!=="/steam/callback"){response.writeHead(404);response.end();return}
+        if(request.method==="POST"){
+          const body=new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+          body.forEach((value,key)=>callback.searchParams.set(key,value));
+        }
+        response.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","Connection":"close"});
+        response.end('<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="color-scheme" content="dark"><title>Fog Companion</title><style>body{margin:0;display:grid;place-items:center;min-height:100vh;background:#171a21;color:#f1f1f1;font:16px system-ui}.box{text-align:center}.mark{color:#d63645;font-size:42px}small{color:#9aa0a8}</style><div class="box"><div class="mark">&#10003;</div><h2>Steam подтвердил вход</h2><small>Fog Companion проверяет подпись аккаунта…</small></div>');
+        logDiagnostic("info","steam-auth-callback-received",{method:request.method});
+        void complete(callback.toString());
+      });
+    });
+    callbackServer.once("error",error=>{clearTimeout(timer);finish(new Error(`Не удалось запустить локальный вход Steam: ${error.message}`))});
+    callbackServer.listen(0,"127.0.0.1",()=>{
+      const address=callbackServer.address();
+      if(!address||typeof address==="string"){clearTimeout(timer);finish(new Error("Не удалось получить локальный адрес входа Steam."));return}
+      callbackOrigin=`http://127.0.0.1:${address.port}`;
+      returnTo=`${callbackOrigin}/steam/callback?state=${authState}`;
+      const parameters=new URLSearchParams({"openid.ns":"http://specs.openid.net/auth/2.0","openid.mode":"checkid_setup","openid.return_to":returnTo,"openid.realm":`${callbackOrigin}/`,"openid.identity":"http://specs.openid.net/auth/2.0/identifier_select","openid.claimed_id":"http://specs.openid.net/auth/2.0/identifier_select"}),loginUrl=`${steamOpenIdEndpoint}?${parameters}`;
+      steamAuthWindow=new BrowserWindow({parent:mainWindow||undefined,modal:Boolean(mainWindow),width:760,height:820,minWidth:620,minHeight:680,show:true,title:"Вход через Steam — Fog Companion",autoHideMenuBar:true,backgroundColor:"#171a21",icon:appIcon(),webPreferences:{partition:steamAuthPartition,contextIsolation:true,nodeIntegration:false,sandbox:true}});
+      steamAuthWindow.center();steamAuthWindow.show();steamAuthWindow.focus();
+      steamAuthWindow.webContents.on("will-redirect",handleNavigation);steamAuthWindow.webContents.on("will-navigate",handleNavigation);steamAuthWindow.webContents.setWindowOpenHandler(()=>({action:"deny"}));
+      steamAuthWindow.webContents.on("did-finish-load",()=>{if(steamAuthWindow&&!steamAuthWindow.isDestroyed()){steamAuthWindow.show();steamAuthWindow.focus()}});
+      steamAuthWindow.webContents.on("did-fail-load",(_event,code,description,target,isMainFrame)=>{if(isMainFrame&&!(target||"").startsWith(callbackOrigin))logDiagnostic("warn","steam-auth-page-failed",{code,description,target})});
+      steamAuthWindow.on("closed",()=>{steamAuthWindow=null;clearTimeout(timer);if(!settled)finish(new Error("Окно входа через Steam закрыто."))});
+      steamAuthWindow.loadURL(loginUrl).catch(error=>{clearTimeout(timer);finish(new Error(`Не удалось открыть Steam: ${error.message}`))});
+    });
+  });
+}
+function loginWithSteam(){
+  if(steamAuthPromise){if(steamAuthWindow&&!steamAuthWindow.isDestroyed()){steamAuthWindow.show();steamAuthWindow.focus()}return steamAuthPromise}
+  logDiagnostic("info","steam-auth-started");send("auth:status",{type:"info",message:"Открылось защищённое окно Steam. Завершите вход в нём."});
+  steamAuthPromise=createSteamAuthFlow();steamAuthPromise.finally(()=>{steamAuthPromise=null}).catch(()=>{});return steamAuthPromise;
+}
+async function logoutAccount(){
+  const previous=store.account;store.account=null;writeStore(store);
+  await session.fromPartition(steamAuthPartition).clearStorageData({storages:["cookies"]}).catch(()=>{});
+  logDiagnostic("info","account-logout",{provider:previous?.provider||"",steamId:previous?.steamId||""});send("sync:status",{type:"info",message:"Вы вышли из профиля Fog Companion.",data:store});return store;
+}
 async function currentSteamAvatar(account) {
   const fallback=normalizeImage(account?.avatarUrl||"");
   const profileUrl=account?.profileUrl||"";
@@ -320,11 +464,11 @@ async function currentSteamAvatar(account) {
 }
 
 async function refreshStoredProfileAvatar() {
-  const profile=store.profile||{};
-  if(profile.platform!=="STEAM"||!profile.profileUrl)return false;
-  const avatar=await currentSteamAvatar({type:"steam",profileUrl:profile.profileUrl,avatarUrl:profile.avatar});
-  if(!avatar||avatar===profile.avatar)return false;
-  store.profile={...profile,avatar};writeStore(store);send("sync:status",{type:"silent",message:"",data:store});return true;
+  const account=store.account;
+  if(account?.provider!=="steam"||!account.steamId)return false;
+  const current=await steamPublicProfile(account.steamId,account),next={...account,...current};
+  if(JSON.stringify(account)===JSON.stringify(next))return false;
+  store.account=next;applyAuthenticatedIdentity(store);writeStore(store);send("sync:status",{type:"silent",message:"",data:store});return true;
 }
 
 const addonIndexPages=["Фонарик (улучшения)","Аптечка (улучшения)","Ящик с инструментами (улучшения)","Карта (улучшения)","Ключ (улучшения)"];
@@ -411,8 +555,7 @@ function participantFromRaw(raw,index) {
   };
 }
 
-function escaped(participant) { return /escape|escaped|hatch|gate|сбеж|выжил/i.test(participant.result||""); }
-function leftTrial(participant) { return /surrender|disconnect|manuallyleft|сдался|покинул матч|потеря соединения|вышел из матча/i.test(participant.result||""); }
+function escaped(participant) { return /escape|escaped|hatch|gate|сбеж/i.test(participant.result||""); }
 function normalizeMatches(payload) {
   const rows=Array.isArray(payload)?payload:(payload?.data||payload?.items||payload?.results||[]);
   if(!Array.isArray(rows)) return [];
@@ -428,8 +571,8 @@ function normalizeMatches(payload) {
       startTime:Number(match.matchStartTime||Math.floor(Date.now()/1000)), duration,
       map:match.map?.name||"Неизвестная карта", mapImage:normalizeImage(match.map?.image?.path||""),
       gameType:/^online$/i.test(match.gameType?.name||match.gameType?.id||"")?"Обычный матч":match.gameType?.name||match.gameType?.id||"Обычный матч", player, participants:others,
-      // Surrender/disconnect are distinct outcomes, not explicit kill statuses.
-      kills:player.role==="killer" ? survivors.filter(p=>p.result && !escaped(p)&&!leftTrial(p)).length : null
+      // Для статистики убийцы любой подтвержденный исход, кроме побега, считается убийством.
+      kills:player.role==="killer" ? survivors.filter(p=>p.result && !escaped(p)).length : null
     };
   });
 }
@@ -488,7 +631,7 @@ function importOfficial(payload,{silent=false}={}) {
   const existing=store.meta?.demo?[]:store.matches||[];
   const map=new Map(existing.map(m=>[m.id,m])); imported.forEach(m=>map.set(m.id,m));
   store.matches=[...map.values()].sort((a,b)=>b.startTime-a.startTime).slice(0,500);
-  store.meta={demo:false,lastSync:Date.now(),source:"official-stats"}; writeStore(store);
+  store.meta={demo:false,lastSync:Date.now(),source:"official-stats"}; applyAuthenticatedIdentity(store); writeStore(store);
   send("sync:status",{type:silent?"silent":"success",message:silent?"":`Импортировано матчей: ${imported.length}`,data:store});
   return imported.length;
 }
@@ -498,13 +641,13 @@ async function importProfile(payload,{silent=false}={}) {
   const accounts=Array.isArray(payload.accounts)?payload.accounts:[];
   const account=accounts.find(item=>item.type==="steam"&&item.avatarUrl)||accounts.find(item=>item.avatarUrl)||accounts[0]||{};
   const next={
-    name:payload.nickName||account.userName||store.profile?.name||"Игрок DBD",
-    platform:String(account.type||store.profile?.platform||"Behaviour").toUpperCase(),
+    name:payload.nickName||account.userName||store.behaviourProfile?.name||"Игрок DBD",
+    platform:String(account.type||store.behaviourProfile?.platform||"Behaviour").toUpperCase(),
     avatar:await currentSteamAvatar(account),
     profileUrl:account.profileUrl||""
   };
-  if(JSON.stringify(store.profile||{})===JSON.stringify(next))return false;
-  store.profile=next;writeStore(store);
+  if(JSON.stringify(store.behaviourProfile||{})===JSON.stringify(next))return false;
+  store.behaviourProfile=next;writeStore(store);
   send("sync:status",{type:silent?"silent":"info",message:silent?"":"Профиль найден. Загружаю историю матчей…",data:store});
   return true;
 }
@@ -565,6 +708,7 @@ function createOverlayWindow() {
 }
 
 async function toggleOverlay() {
+  if(!store?.account){showMainWindow();send("auth:status",{type:"error",message:"Сначала войдите в Fog Companion через Steam."});return;}
   if(!overlayWindow||overlayWindow.isDestroyed())createOverlayWindow();
   if(overlayWindow.isVisible()){overlayWindow.hide();return;}
   if(!await gameRunning()){
@@ -738,6 +882,7 @@ function openStatsSync(silent=false) {
 }
 
 function maybeAutoSync(force=false) {
+  if(!store?.account)return false;
   if(store.meta?.source!=="official-stats"||statsWindow)return false;
   if(!force&&Date.now()-lastAutoSyncAttempt<45000)return false;
   lastAutoSyncAttempt=Date.now();openStatsSync(true);return true;
@@ -749,29 +894,52 @@ function gameRunning() {
 async function waitForGame(timeoutMs=180000) { const end=Date.now()+timeoutMs; while(Date.now()<end){if(await gameRunning())return true;await sleep(3000);}return false; }
 function runHelper(points){return new Promise((resolve,reject)=>{
   const startedAt=Date.now(),scriptPath=ensureInputHelper();logDiagnostic("info","selection-helper-started",{scriptPath});
-  const args=["-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",scriptPath,"-OpenX",String(points.open.x),"-OpenY",String(points.open.y),"-SearchX",String(points.search.x),"-SearchY",String(points.search.y),"-ResultX",String(points.result.x),"-ResultY",String(points.result.y)];
+  const args=["-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",scriptPath,"-SearchX",String(points.search.x),"-SearchY",String(points.search.y),"-ResultX",String(points.result.x),"-ResultY",String(points.result.y)];
+  if(points.target)args.push("-TargetX",String(points.target.x),"-TargetY",String(points.target.y));
   const child=spawn("powershell.exe",args,{windowsHide:true,stdio:["ignore","pipe","pipe"]}),stdout=[],stderr=[];let settled=false;
   child.stdout.on("data",chunk=>stdout.push(Buffer.from(chunk)));child.stderr.on("data",chunk=>stderr.push(Buffer.from(chunk)));
   child.on("error",error=>{if(settled)return;settled=true;writeCrashReport("selection-helper-spawn-error",error,{scriptPath});reject(error)});
   child.on("exit",code=>{if(settled)return;settled=true;const out=decodePowerShellOutput(stdout),err=decodePowerShellOutput(stderr);logDiagnostic(code===0?"info":"error","selection-helper-exit",{code,durationMs:Date.now()-startedAt,stdout:out,stderr:err,scriptPath});code===0?resolve():reject(new Error(err||out||`PowerShell завершился с кодом ${code}`))});
 });}
+function runPerkHelper(perks,slotPoints,search,result){return new Promise((resolve,reject)=>{
+  const startedAt=Date.now(),scriptPath=ensureInputHelper(),namesBase64=Buffer.from(JSON.stringify(perks.map(perk=>perk.name)),"utf8").toString("base64"),args=["-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",scriptPath,"-SearchX",String(search.x),"-SearchY",String(search.y),"-ResultX",String(result.x),"-ResultY",String(result.y),"-NamesBase64",namesBase64];
+  slotPoints.forEach((point,index)=>args.push(`-Slot${index+1}X`,String(point.x),`-Slot${index+1}Y`,String(point.y)));
+  logDiagnostic("info","perk-selection-helper-started",{scriptPath,perks:perks.map(perk=>perk.name)});
+  const child=spawn("powershell.exe",args,{windowsHide:true,stdio:["ignore","pipe","pipe"]}),stdout=[],stderr=[];let settled=false;
+  child.stdout.on("data",chunk=>stdout.push(Buffer.from(chunk)));child.stderr.on("data",chunk=>stderr.push(Buffer.from(chunk)));
+  child.on("error",error=>{if(settled)return;settled=true;writeCrashReport("perk-selection-helper-spawn-error",error,{scriptPath});reject(error)});
+  child.on("exit",code=>{if(settled)return;settled=true;const out=decodePowerShellOutput(stdout),err=decodePowerShellOutput(stderr);logDiagnostic(code===0?"info":"error","perk-selection-helper-exit",{code,durationMs:Date.now()-startedAt,stdout:out,stderr:err});code===0?resolve():reject(new Error(err||out||`PowerShell завершился с кодом ${code}`))});
+});}
 
 app.whenReady().then(()=>{
   app.setAppUserModelId("local.fogcompanion.desktop");
   try{ensureInputHelper()}catch(error){logDiagnostic("error","selection-helper-prepare-failed",{error:diagnosticValue(error)})}
-  store=loadStore();createMainWindow();createOverlayWindow();createTray();
+  store=loadStore();
+  if(applyAuthenticatedIdentity(store))writeStore(store);
+  createMainWindow();createOverlayWindow();createTray();
   setTimeout(()=>refreshStoredProfileAvatar(),900);
   if(process.argv.includes("--sync-once")){setTimeout(()=>openStatsSync(true),1000);setTimeout(()=>app.exit(2),45000);}
   globalShortcut.register("Shift+F2",()=>toggleOverlay());
-  ipcMain.handle("data:get",()=>store);
+  ipcMain.handle("data:get",()=>{if(applyAuthenticatedIdentity(store))writeStore(store);return store;});
   ipcMain.handle("data:save-settings",(_e,settings)=>{store.settings={...store.settings,...settings};writeStore(store);return store;});
+  ipcMain.handle("randomizer:save",(_e,value)=>{store.randomizer={...store.randomizer,...(value||{})};writeStore(store);sendRandomizerState();return store;});
   ipcMain.handle("data:delete-match",(_e,id)=>{store.matches=store.matches.filter(m=>m.id!==id);writeStore(store);return store;});
-  ipcMain.handle("stats:open-sync",()=>{openStatsSync();return true;});
+  ipcMain.handle("auth:steam-login",()=>loginWithSteam());
+  ipcMain.handle("auth:logout",()=>logoutAccount());
+  ipcMain.handle("stats:open-sync",()=>{if(!store.account)throw new Error("Сначала войдите через Steam.");openStatsSync();return true;});
   ipcMain.handle("perk:get-details",async(_event,perk,kind)=>{
     try{return await getPerkDetails(perk,kind)}
     catch(error){logDiagnostic("error","item-details-load-failed",{id:perk?.id||"",name:perk?.name||"",kind,error:diagnosticValue(error)});throw error}
   });
-  ipcMain.handle("shell:open-external",async(_event,url)=>{if(/^https:\/\//i.test(url||""))await shell.openExternal(url);return true;});
+  ipcMain.handle("shell:open-external",async(_event,url)=>{
+    const target=String(url||"");
+    if(!/^https:\/\//i.test(target))return false;
+    if(/^https:\/\/steamcommunity\.com\/(?:id|profiles)\//i.test(target)){
+      try{await shell.openExternal(`steam://openurl/${target}`);return true}
+      catch(error){logDiagnostic("warn","steam-client-profile-open-failed",{target,error:diagnosticValue(error)})}
+    }
+    await shell.openExternal(target);return true;
+  });
   ipcMain.handle("game:status",()=>gameRunning());
   ipcMain.handle("update:get-status",()=>updateState);
   ipcMain.handle("update:check",()=>checkForUpdates(true));
@@ -779,15 +947,34 @@ app.whenReady().then(()=>{
   ipcMain.handle("diagnostics:open",()=>openDiagnosticsFolder());
   ipcMain.handle("calibration:capture",async(_e,kind)=>{mainWindow.hide();await sleep(3500);const point=screen.getCursorScreenPoint();mainWindow.show();mainWindow.maximize();mainWindow.focus();return{kind,point};});
   ipcMain.handle("game:select",async(_e,payload)=>{
-    const {killer,openPoint,searchPoint,resultPoint}=payload||{};
+    if(!store.account)throw new Error("Сначала войдите в Fog Companion через Steam.");
+    if(!store.settings?.automationEnabled)throw new Error("Включите автоматический выбор в настройках Companion.");
+    const {killer,searchPoint,resultPoint}=payload||{};
     logDiagnostic("info","killer-selection-requested",{killer:killer?.name||"",gameRunning:"checking"});
-    if(!killer||!openPoint||!searchPoint||!resultPoint)throw new Error("Сначала откалибруйте три точки в настройках.");
+    if(!killer||!searchPoint||!resultPoint)throw new Error("Сначала откалибруйте поле поиска и первую карточку результата.");
     let running=await gameRunning();
     if(!running){send("game:selection-status",{type:"info",message:"Запускаю Dead by Daylight через Steam…"});await shell.openExternal("steam://rungameid/381210");running=await waitForGame();if(!running)throw new Error("Игра не запустилась за 3 минуты.");send("game:selection-status",{type:"info",message:"Игра запущена. Жду загрузку лобби…"});await sleep(35000);}
     const oldClipboard=clipboard.readText();clipboard.writeText(killer.search||killer.name);if(overlayWindow&&!overlayWindow.isDestroyed())overlayWindow.hide();await sleep(25);
-    try{await runHelper({open:openPoint,search:searchPoint,result:resultPoint});logDiagnostic("info","killer-selection-complete",{killer:killer.name});return true;}
+    try{await runHelper({search:searchPoint,result:resultPoint});logDiagnostic("info","killer-selection-complete",{killer:killer.name});return true;}
     catch(error){const report=writeCrashReport("killer-selection-failed",error,{killer:killer.name});const visibleError=new Error("Автовыбор не сработал. Отчёт сохранён — откройте Настройки → Диагностика → Открыть папку с логами.");visibleError.report=report;throw visibleError;}
     finally{clipboard.writeText(oldClipboard);}
+  });
+  ipcMain.handle("game:select-perks",async(_e,payload)=>{
+    if(!store.account)throw new Error("Сначала войдите в Fog Companion через Steam.");
+    if(!store.settings?.automationEnabled)throw new Error("Включите автоматический выбор в настройках Companion.");
+    const {perks,slotPoints,searchPoint,resultPoint}=payload||{},selected=(perks||[]).filter(perk=>perk?.name);
+    if(selected.length!==4||!Array.isArray(slotPoints)||slotPoints.length!==4||slotPoints.some(point=>!point)||!searchPoint||!resultPoint)throw new Error("Сначала выберите четыре перка и откалибруйте шесть точек автовыбора.");
+    if(!await gameRunning())throw new Error("Dead by Daylight не запущен. Откройте игру и экран перков.");
+    const oldClipboard=clipboard.readText();
+    if(overlayWindow&&!overlayWindow.isDestroyed())overlayWindow.hide();
+    try{
+      await runPerkHelper(selected,slotPoints,searchPoint,resultPoint);
+      logDiagnostic("info","perk-selection-complete",{perks:selected.map(perk=>perk.name)});
+      return true;
+    }catch(error){
+      const report=writeCrashReport("perk-selection-failed",error,{perks:selected.map(perk=>perk.name)});
+      const visibleError=new Error("Автовыбор перков не сработал. Отчёт сохранён в папке диагностики.");visibleError.report=report;throw visibleError;
+    }finally{clipboard.writeText(oldClipboard);}
   });
   ipcMain.on("overlay:hide",()=>{if(overlayWindow&&!overlayWindow.isDestroyed())overlayWindow.hide();});
   ipcMain.on("window:minimize",()=>mainWindow.minimize());

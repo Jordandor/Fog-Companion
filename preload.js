@@ -2,7 +2,10 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("fogAPI", {
   getData: () => ipcRenderer.invoke("data:get"),
+  loginSteam: () => ipcRenderer.invoke("auth:steam-login"),
+  logoutAccount: () => ipcRenderer.invoke("auth:logout"),
   saveSettings: settings => ipcRenderer.invoke("data:save-settings", settings),
+  saveRandomizer: value => ipcRenderer.invoke("randomizer:save", value),
   deleteMatch: id => ipcRenderer.invoke("data:delete-match", id),
   openStatsSync: () => ipcRenderer.invoke("stats:open-sync"),
   getPerkDetails: (perk, kind) => ipcRenderer.invoke("perk:get-details", perk, kind),
@@ -14,13 +17,16 @@ contextBridge.exposeInMainWorld("fogAPI", {
   openDiagnostics: () => ipcRenderer.invoke("diagnostics:open"),
   capturePoint: kind => ipcRenderer.invoke("calibration:capture", kind),
   selectKiller: payload => ipcRenderer.invoke("game:select", payload),
+  selectPerks: payload => ipcRenderer.invoke("game:select-perks", payload),
   minimize: () => ipcRenderer.send("window:minimize"),
   maximize: () => ipcRenderer.send("window:maximize"),
   close: () => ipcRenderer.send("window:close"),
   hideOverlay: () => ipcRenderer.send("overlay:hide"),
   onSyncStatus: callback => ipcRenderer.on("sync:status", (_event, value) => callback(value)),
+  onAuthStatus: callback => ipcRenderer.on("auth:status", (_event, value) => callback(value)),
   onGameStatus: callback => ipcRenderer.on("game:selection-status", (_event, value) => callback(value)),
   onUpdateStatus: callback => ipcRenderer.on("update:status", (_event, value) => callback(value)),
   onWindowShown: callback => ipcRenderer.on("window:shown", callback),
-  onOverlayShown: callback => ipcRenderer.on("overlay:shown", (_event, value) => callback(value))
+  onOverlayShown: callback => ipcRenderer.on("overlay:shown", (_event, value) => callback(value)),
+  onRandomizerUpdated: callback => ipcRenderer.on("randomizer:updated", (_event, value) => callback(value))
 });

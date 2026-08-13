@@ -6,6 +6,17 @@
 </head>
 <body>
   <div class="app-shell">
+    <section id="authGate" class="auth-gate">
+      <div class="auth-gate-card">
+        <img src="assets/fog-companion-emblem.png" alt="" class="auth-emblem">
+        <span class="eyebrow">ПРОФИЛЬ FOG COMPANION</span>
+        <h1>Войти в Туман</h1>
+        <p>Для работы Companion войдите через Steam. Пароль вводится только на официальной странице Steam и не передаётся приложению.</p>
+        <button id="steamLoginButton" class="steam-login-button"><span>STEAM</span> Войти через Steam</button>
+        <button id="epicLoginButton" class="epic-login-button" disabled>Авторизация через Epic Games — скоро</button>
+        <small id="authGateStatus">После входа отдельно подключите Behaviour Account для истории матчей.</small>
+      </div>
+    </section>
     <header class="titlebar">
       <div class="logo"><img class="app-brand-emblem" src="assets/fog-companion-emblem.png" alt=""><div><b>FOG</b><strong>COMPANION</strong></div><em id="appVersionBadge">—</em></div>
       <div class="title-actions"><button id="minimize">—</button><button id="maximize">□</button><button id="close">×</button></div>
@@ -35,7 +46,7 @@
           <div class="chart-card-head"><div><div class="section-label">РЕЗУЛЬТАТЫ МАТЧЕЙ</div><small id="chartPeriodLabel">Убийцы и выжившие за 30 дней</small></div><button id="chartInfo" aria-label="Как читать график">?</button></div>
           <div id="sparkline" class="sparkline" aria-label="Результаты матчей за последние 30 дней"></div>
           <div id="chartTooltip" class="chart-tooltip">Наведи на столбец, чтобы увидеть матч</div>
-          <div class="chart-legend"><span><i class="killer-dot"></i> убийства из 4</span><span><i class="survivor-dot"></i> побег</span></div>
+          <div class="chart-legend"><span><i class="killer-dot"></i> доля убийств в матче</span><span><i class="survivor-dot"></i> побег</span></div>
           <button id="chartOpenHistory" class="chart-history-button">Открыть историю</button>
         </div>
         <div class="privacy-card"><b>Локальный архив</b><p>История хранится на этом компьютере. Токен Behaviour не копируется в базу приложения.</p></div>
@@ -70,12 +81,22 @@
     <main id="settingsPage" class="page wide-page settings-page">
       <div class="page-heading"><div><span class="eyebrow">ПАРАМЕТРЫ</span><h1>Настройки Companion</h1></div></div>
       <div class="settings-grid">
+        <section class="settings-panel account-panel"><h2>Профиль Fog Companion</h2><div id="accountStatus" class="account-status">Steam не подключён</div><p>Steam отвечает за имя, аватар и идентификатор вашего профиля Companion. Behaviour Account используется отдельно — только для статистики DBD.</p><button class="red-button" id="steamAccountButton">Войти через Steam</button><button class="ghost-button account-logout" id="accountLogoutButton" hidden>Выйти из профиля</button></section>
         <section class="settings-panel"><h2>Синхронизация матчей</h2><p>Вход происходит в официальном окне Behaviour. Companion обновляет историю при запуске, при показе через Shift+F2 и каждую минуту. В базу сохраняется только отображаемая история.</p><button class="red-button" id="settingsSync">Открыть DBD Stats Tracker</button></section>
-        <section class="settings-panel"><h2>Автовыбор убийцы</h2><p>Задайте три экранные точки. После кнопки у вас будет 3,5 секунды, чтобы навести курсор.</p>
-          <button class="point-button" data-point="open"><span>1</span><div><b>Кнопка списка убийц</b><small id="openPointLabel">не задано</small></div></button>
-          <button class="point-button" data-point="search"><span>2</span><div><b>Поле поиска персонажей</b><small id="searchPointLabel">не задано</small></div></button>
-          <button class="point-button" data-point="result"><span>3</span><div><b>Первая карточка результата</b><small id="resultPointLabel">не задано</small></div></button>
-          <label class="toggle-row"><input id="automationToggle" type="checkbox"><span><b>Автоматический выбор</b><small>После выпадения Companion переключится в DBD и выберет персонажа.</small></span></label>
+        <section class="settings-panel"><h2>Автовыбор убийцы</h2><p>Откройте вкладку убийц самостоятельно, затем задайте две экранные точки. После нажатия у вас будет 3,5 секунды, чтобы навести курсор.</p>
+          <button class="point-button" data-point="search"><span>1</span><div><b>Поле поиска персонажей</b><small id="searchPointLabel">не задано</small></div></button>
+          <button class="point-button" data-point="result"><span>2</span><div><b>Первая карточка результата</b><small id="resultPointLabel">не задано</small></div></button>
+          <label class="toggle-row"><input id="automationToggle" type="checkbox"><span><b>Автоматический выбор</b><small>Разрешает кнопке в оверлее переключиться в DBD и выбрать сохраненного персонажа.</small></span></label>
+        </section>
+        <section class="settings-panel perk-calibration-panel"><h2>Автовыбор перков</h2><p>Откройте экран экипировки с перками. По очереди укажите четыре слота, поле поиска и первую карточку результата.</p>
+          <div class="perk-point-grid">
+            <button class="point-button" data-point="perkSlot1"><span>1</span><div><b>Слот перка 1</b><small id="perkSlot1PointLabel">не задано</small></div></button>
+            <button class="point-button" data-point="perkSlot2"><span>2</span><div><b>Слот перка 2</b><small id="perkSlot2PointLabel">не задано</small></div></button>
+            <button class="point-button" data-point="perkSlot3"><span>3</span><div><b>Слот перка 3</b><small id="perkSlot3PointLabel">не задано</small></div></button>
+            <button class="point-button" data-point="perkSlot4"><span>4</span><div><b>Слот перка 4</b><small id="perkSlot4PointLabel">не задано</small></div></button>
+          </div>
+          <button class="point-button" data-point="perkSearch"><span>5</span><div><b>Поле поиска перков</b><small id="perkSearchPointLabel">не задано</small></div></button>
+          <button class="point-button" data-point="perkResult"><span>6</span><div><b>Первый результат поиска</b><small id="perkResultPointLabel">не задано</small></div></button>
         </section>
         <section class="settings-panel"><h2>Горячая клавиша</h2><div class="hotkey-display"><kbd>Shift</kbd><span>+</span><kbd>F2</kbd></div><p>Показать или скрыть компактный оверлей во время работы DBD. Большое окно Companion остается открытым.</p></section>
         <section class="settings-panel update-panel"><h2>Обновления</h2><p id="updateStatusText">Проверяю актуальную версию…</p><small id="updateVersionText">Текущая версия</small><button class="red-button" id="updateButton">Проверить обновления</button></section>
@@ -91,7 +112,12 @@
 
     <div id="perkModal" class="modal"><div class="modal-backdrop" data-close="perk"></div><section class="perk-detail"><header><div><span class="eyebrow" id="perkDetailKind">ОПИСАНИЕ НАВЫКА</span><h2 id="perkDetailTitle">Навык</h2></div><button data-close="perk">×</button></header><div class="perk-detail-body"><aside class="perk-detail-aside"><div class="perk-detail-icon"><img id="perkDetailImage" alt=""></div><blockquote id="perkDetailQuote" hidden></blockquote></aside><div class="perk-detail-copy"><p id="perkDetailStatus">Загрузка описания…</p><section id="perkDescriptionSection" class="detail-copy-section"><h3>Описание:</h3><div id="perkDetailDescription"></div><div id="perkCharacteristicsSection" class="detail-description-points" hidden><ul id="perkDetailCharacteristics"></ul></div></section><section id="perkFeaturesSection" class="detail-copy-section" hidden><h3>Особенности:</h3><div id="perkFeaturesLead"></div><ul id="perkDetailFeatures"></ul></section><button id="perkRetryButton" class="ghost-button" hidden>Повторить загрузку</button><button id="perkSourceButton" class="ghost-button" hidden>Открыть источник</button></div></div></section></div>
 
-    <div id="wheelModal" class="modal"><div class="modal-backdrop" data-close="wheel"></div><section class="wheel-dialog"><header><div><span class="eyebrow">СУЩНОСТЬ РЕШАЕТ</span><h2>Рандомайзер убийцы</h2></div><button data-close="wheel">×</button></header><div class="wheel-layout"><div class="wheel-stage"><div class="wheel-pointer"></div><canvas id="wheelCanvas" width="900" height="900"></canvas><button id="spinWheel" class="wheel-core">КРУТИТЬ<small>SPACE</small></button></div><div class="wheel-result"><div id="wheelResultPortrait" class="wheel-result-portrait mystery"><span>?</span><img id="wheelResultImage" alt=""></div><span>В ТУМАН ИДЕТ</span><strong id="wheelResultName">Крути колесо</strong><p id="wheelStatus">После выпадения можно автоматически открыть DBD и выбрать убийцу.</p><button id="pickInGame" disabled>Выбрать и открыть DBD</button><button id="spinAgain" class="ghost-button" disabled>Еще раз</button></div></div></section></div>
+    <div id="wheelModal" class="modal"><div class="modal-backdrop" data-close="wheel"></div><section class="wheel-dialog"><header><div><span class="eyebrow">СУЩНОСТЬ РЕШАЕТ</span><h2>Рандомайзер экипировки</h2></div><div class="wheel-header-actions"><button id="wheelSettingsToggle" type="button" aria-label="Настройки колеса">⚙</button><button data-close="wheel">×</button></div></header>
+      <div class="randomizer-tabs"><button class="active" data-randomizer-tab="killer">Убийца</button><button data-randomizer-tab="perks">Перки</button></div>
+      <section id="wheelSettingsPanel" class="wheel-settings-panel" hidden><div class="wheel-settings-row"><label><b>Не повторять выпавшего убийцу</b><span><input id="wheelCooldownInput" type="number" min="0" max="50" step="1"> следующих прокруток</span></label><div><button id="enableAllKillers" type="button">Включить всех</button><button id="disableAllKillers" type="button">Снять все</button></div></div><p>Снимите галочку с убийц, которых не хотите видеть в колесе.</p><div id="killerToggleGrid" class="killer-toggle-grid"></div></section>
+      <div id="killerRandomizerPanel" class="wheel-layout"><div class="wheel-stage"><div class="wheel-pointer"></div><canvas id="wheelCanvas" width="900" height="900"></canvas><button id="spinWheel" class="wheel-core">КРУТИТЬ<small>SPACE</small></button></div><div class="wheel-result"><div id="wheelResultPortrait" class="wheel-result-portrait mystery"><span>?</span><img id="wheelResultImage" alt=""></div><span>В ТУМАН ИДЕТ</span><strong id="wheelResultName">Крути колесо</strong><p id="wheelStatus">Прокрутите колесо и сохраните результат для внутриигрового оверлея.</p><button id="saveKillerForOverlay" disabled>Выбрать убийцу</button><button id="spinAgain" class="ghost-button" disabled>Еще раз</button></div></div>
+      <section id="perkRandomizerPanel" class="perk-randomizer-panel" hidden><div><span class="eyebrow">СЛУЧАЙНАЯ СБОРКА</span><h3>Четыре перка убийцы</h3><p id="perkRandomizerStatus">Перки берутся из известного Companion каталога матчей. Закрепите понравившиеся и перекручивайте остальные.</p></div><div id="perkRandomizerSlots" class="perk-randomizer-slots"></div><div class="perk-randomizer-actions"><button id="rerollPerks">Перекрутить незакрепленные</button><button id="savePerksForOverlay" class="ghost-button" disabled>Сохранить для оверлея</button></div></section>
+    </section></div>
 
     <div id="toast" class="toast"></div>
   </div>

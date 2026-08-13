@@ -18,3 +18,24 @@
 
 /* The compact Shift+F2 overlay uses the same transparent emblem as the main window. */
 .overlay-brand-emblem { display:block; width:38px; height:38px; flex:none; object-fit:contain; opacity:.97; filter:drop-shadow(0 0 6px rgba(198,43,52,.48)); }
+
+.overlay-content { padding-top:13px; }
+.overlay-tabs { display:flex; justify-content:center; gap:5px; margin-top:10px; }
+.overlay-tabs button { min-width:92px; padding:6px 10px; border:1px solid rgba(255,255,255,.1); border-radius:5px; background:#18191e; color:#7b777d; font-size:9px; cursor:pointer; }
+.overlay-tabs button.active { border-color:rgba(198,43,52,.45); background:#711a21; color:#fff; }
+.overlay-tabs + #overlayKillerPanel .wheel-stage { margin-top:5px; }
+.overlay-perk-panel { padding-top:40px; text-align:center; }
+.overlay-perk-panel > div:first-child > span { color:#a86065; font-size:9px; font-weight:800; letter-spacing:.15em; }
+.overlay-perk-panel > div:first-child > strong { display:block; margin:7px 0; font:700 25px Georgia,serif; }
+.overlay-perk-panel > div:first-child > p { min-height:34px; color:#77747b; font-size:10px; line-height:1.5; }
+.overlay-perk-slots { display:grid; grid-template-columns:1fr 1fr; gap:14px; width:236px; margin:28px auto; }
+.overlay-perk-slots button { position:relative; width:108px; height:108px; display:grid; place-items:center; overflow:hidden; border:1px solid rgba(198,43,52,.35); border-radius:8px; background:radial-gradient(circle,#5c2026,#111216 70%); cursor:pointer; }
+.overlay-perk-slots button.locked { border-color:#c49a58; box-shadow:0 0 17px rgba(196,154,88,.18); }
+.overlay-perk-slots img { width:100%; height:100%; object-fit:contain; }
+.overlay-perk-slots span { font:700 43px Georgia,serif; color:#777179; }
+.overlay-perk-slots i { position:absolute; right:4px; bottom:4px; padding:3px; border-radius:4px; background:rgba(9,10,13,.85); font-size:10px; font-style:normal; }
+#overlayRerollPerks,#overlayPickPerks { width:100%; min-height:40px; margin-top:8px; border-radius:6px; font-size:10px; font-weight:800; cursor:pointer; }
+#overlayRerollPerks { border:1px solid rgba(255,255,255,.1); background:#1a1b20; color:#aaa5aa; }
+#overlayPickPerks { border:0; background:linear-gradient(#d63b44,#a51f27); color:white; }
+#overlayPickPerks:disabled { opacity:.42; filter:grayscale(1); cursor:not-allowed; }
+.overlay-content [hidden] { display:none!important; }
