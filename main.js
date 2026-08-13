@@ -5,7 +5,11 @@ const crypto = require("crypto");
 const http = require("http");
 const { spawn, execFile } = require("child_process");
 
-const hasSingleInstanceLock=app.requestSingleInstanceLock();
+const updateWorkerFlag="--fog-apply-update";
+const updateWorkerIndex=process.argv.indexOf(updateWorkerFlag);
+let updateWorkerRequest=null;
+if(updateWorkerIndex>=0)try{updateWorkerRequest=JSON.parse(Buffer.from(String(process.argv[updateWorkerIndex+1]||""),"base64url").toString("utf8"))}catch{}
+const hasSingleInstanceLock=updateWorkerRequest?true:app.requestSingleInstanceLock();
 if(!hasSingleInstanceLock)app.quit();
 
 const diagnosticsDir=path.join(app.getPath("userData"),"diagnostics");
@@ -14,7 +18,7 @@ const runtimeDir=path.join(app.getPath("userData"),"runtime");
 const runtimeInputHelper=path.join(runtimeDir,"input-helper.ps1");
 const sessionMarker=path.join(diagnosticsDir,"active-session.json");
 const sessionId=`${new Date().toISOString().replace(/[:.]/g,"-")}-${process.pid}`;
-if(hasSingleInstanceLock){fs.mkdirSync(crashDumpDir,{recursive:true});app.setPath("crashDumps",crashDumpDir);crashReporter.start({productName:"Fog Companion",uploadToServer:false,extra:{version:app.getVersion(),sessionId}})}
+if(hasSingleInstanceLock&&!updateWorkerRequest){fs.mkdirSync(crashDumpDir,{recursive:true});app.setPath("crashDumps",crashDumpDir);crashReporter.start({productName:"Fog Companion",uploadToServer:false,extra:{version:app.getVersion(),sessionId}})}
 
 const diagnosticValue=value=>{
   if(value instanceof Error)return{name:value.name,message:value.message,stack:value.stack};
@@ -66,7 +70,7 @@ function beginDiagnosticSession(){
 }
 function finishDiagnosticSession(reason){logDiagnostic("info","app-exit",{reason});try{if(fs.existsSync(sessionMarker))fs.unlinkSync(sessionMarker)}catch(error){logDiagnostic("error","session-marker-remove-failed",error)}}
 
-if(hasSingleInstanceLock){process.on("uncaughtException",error=>{writeCrashReport("uncaught-exception",error);app.isQuitting=true;try{app.exit(1)}catch{process.exit(1)}});process.on("unhandledRejection",reason=>writeCrashReport("unhandled-rejection",reason));beginDiagnosticSession()}
+if(hasSingleInstanceLock&&!updateWorkerRequest){process.on("uncaughtException",error=>{writeCrashReport("uncaught-exception",error);app.isQuitting=true;try{app.exit(1)}catch{process.exit(1)}});process.on("unhandledRejection",reason=>writeCrashReport("unhandled-rejection",reason));beginDiagnosticSession()}
 
 let mainWindow;
 let overlayWindow;
@@ -143,17 +147,51 @@ async function installAvailableUpdate(){
   if(!app.isPackaged||!portableExecutable)throw new Error("Автоустановка доступна только в portable-версии Fog Companion.");
   publishUpdateState({status:"downloading",message:`Скачиваю версию ${updateState.latestVersion}…`});
   const stagingDir=path.join(app.getPath("temp"),"fog-companion-update");fs.mkdirSync(stagingDir,{recursive:true});
-  const stagedExecutable=path.join(stagingDir,`Fog-Companion-${updateState.latestVersion}.exe`),scriptPath=path.join(stagingDir,"install-update.ps1");
+  const stagedExecutable=path.join(stagingDir,`Fog-Companion-${updateState.latestVersion}.exe`);
   try{
     const [binaryResponse,checksumResponse]=await Promise.all([githubResponse(updateState.downloadUrl),githubResponse(updateState.checksumUrl)]),binary=Buffer.from(await binaryResponse.arrayBuffer()),checksumText=await checksumResponse.text(),expected=(checksumText.match(/\b[a-f0-9]{64}\b/i)||[])[0]?.toUpperCase();
     if(!expected)throw new Error("Релиз не содержит корректную контрольную сумму.");
     const actual=crypto.createHash("sha256").update(binary).digest("hex").toUpperCase();
     if(actual!==expected)throw new Error("Контрольная сумма обновления не совпала. Установка отменена.");
     fs.writeFileSync(stagedExecutable,binary);
-    const script=`param([int]$TargetPid,[string]$Source,[string]$Destination)\n$limit=(Get-Date).AddSeconds(45)\nwhile((Get-Process -Id $TargetPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $limit){Start-Sleep -Milliseconds 250}\nfor($attempt=0;$attempt -lt 20;$attempt++){try{Copy-Item -LiteralPath $Source -Destination $Destination -Force;Start-Process -FilePath $Destination;Remove-Item -LiteralPath $Source -Force -ErrorAction SilentlyContinue;exit 0}catch{Start-Sleep -Milliseconds 500}}\nexit 1\n`;
-    fs.writeFileSync(scriptPath,script,"utf8");publishUpdateState({status:"installing",message:"Обновление проверено. Перезапускаю Companion…"});
-    const child=spawn("powershell.exe",["-NoProfile","-ExecutionPolicy","Bypass","-File",scriptPath,"-TargetPid",String(process.pid),"-Source",stagedExecutable,"-Destination",portableExecutable],{detached:true,stdio:"ignore",windowsHide:true});child.unref();app.isQuitting=true;setTimeout(()=>app.quit(),250);return true;
+    publishUpdateState({status:"installing",message:"Обновление проверено. Запускаю установщик…"});
+    logDiagnostic("info","update-worker-starting",{fromVersion:app.getVersion(),toVersion:updateState.latestVersion,source:stagedExecutable,destination:portableExecutable});
+    const workerPayload=Buffer.from(JSON.stringify({source:stagedExecutable,destination:portableExecutable,expected,previousPid:process.pid,version:updateState.latestVersion}),"utf8").toString("base64url");
+    const child=spawn(stagedExecutable,[updateWorkerFlag,workerPayload],{detached:true,stdio:"ignore",windowsHide:true});
+    await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error("Не удалось запустить установщик обновления.")),8000);child.once("spawn",()=>{clearTimeout(timer);resolve()});child.once("error",error=>{clearTimeout(timer);reject(error)})});
+    child.unref();
+    publishUpdateState({status:"installing",message:"Установщик запущен. Перезапускаю Companion…"});
+    app.isQuitting=true;
+    setTimeout(()=>app.quit(),250);
+    return true;
   }catch(error){logDiagnostic("error","update-install-failed",{error:diagnosticValue(error)});publishUpdateState({status:"available",message:`Не удалось установить обновление: ${error.message}`});throw error}
+}
+
+async function runUpdateWorker(request){
+  const source=path.resolve(String(request?.source||"")),destination=path.resolve(String(request?.destination||"")),expected=String(request?.expected||"").toUpperCase(),backup=`${destination}.previous`,deadline=Date.now()+90000;
+  if(!source||!destination||!/^[A-F0-9]{64}$/.test(expected))throw new Error("Некорректные параметры установщика обновления.");
+  const sourceHash=crypto.createHash("sha256").update(fs.readFileSync(source)).digest("hex").toUpperCase();
+  if(sourceHash!==expected)throw new Error("Контрольная сумма скачанного обновления не совпала.");
+  logDiagnostic("info","update-worker-ready",{source,destination,previousPid:request.previousPid,version:request.version});
+  let lastError=null,backupReady=false;
+  while(Date.now()<deadline){
+    try{
+      if(!backupReady&&fs.existsSync(destination)){fs.copyFileSync(destination,backup);backupReady=true}
+      fs.copyFileSync(source,destination);
+      const installed=crypto.createHash("sha256").update(fs.readFileSync(destination)).digest("hex").toUpperCase();
+      if(installed!==expected)throw new Error("Проверка установленного portable-файла не прошла.");
+      logDiagnostic("info","update-worker-installed",{destination,backup:backupReady?backup:"",version:request.version});
+      await new Promise(resolve=>setTimeout(resolve,1500));
+      logDiagnostic("info","update-worker-relaunching",{destination,version:request.version});
+      const relaunched=spawn(destination,[],{detached:true,stdio:"ignore",windowsHide:true});
+      await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error("Новая версия не запустилась после установки.")),8000);relaunched.once("spawn",()=>{clearTimeout(timer);resolve()});relaunched.once("error",error=>{clearTimeout(timer);reject(error)})});
+      relaunched.unref();
+      logDiagnostic("info","update-worker-relaunched",{destination,version:request.version});
+      return true;
+    }catch(error){lastError=error;await new Promise(resolve=>setTimeout(resolve,500))}
+  }
+  if(backupReady&&fs.existsSync(backup))try{fs.copyFileSync(backup,destination)}catch{}
+  throw lastError||new Error("Portable-файл оставался занят дольше 90 секунд.");
 }
 
 function demoParticipant(role, character, result, score, perks, number) {
@@ -958,7 +996,17 @@ function runPerkHelper(perks,slotPoints,search,result){return new Promise((resol
 });}
 
 app.whenReady().then(()=>{
+  if(updateWorkerRequest){
+    runUpdateWorker(updateWorkerRequest).then(()=>app.exit(0)).catch(error=>{
+      writeCrashReport("update-worker-failed",error,updateWorkerRequest);
+      const fallback=String(updateWorkerRequest.destination||"");
+      if(fallback&&fs.existsSync(fallback))try{const child=spawn(fallback,[],{detached:true,stdio:"ignore",windowsHide:true});child.unref()}catch{}
+      app.exit(1);
+    });
+    return;
+  }
   app.setAppUserModelId("local.fogcompanion.desktop");
+  setTimeout(()=>{try{fs.rmSync(path.join(app.getPath("temp"),"fog-companion-update"),{recursive:true,force:true})}catch{}},7000);
   try{ensureInputHelper()}catch(error){logDiagnostic("error","selection-helper-prepare-failed",{error:diagnosticValue(error)})}
   store=loadStore();
   if(applyAuthenticatedIdentity(store))writeStore(store);
@@ -1036,6 +1084,6 @@ app.whenReady().then(()=>{
 
 app.on("render-process-gone",(_event,webContents,details)=>{if(!app.isQuitting&&details.reason!=="clean-exit")logDiagnostic("error","render-process-gone",{url:webContents?.getURL?.()||"",...details})});
 app.on("child-process-gone",(_event,details)=>{if(!app.isQuitting&&details.reason!=="clean-exit")writeCrashReport("child-process-gone",new Error(`Child process: ${details.reason}`),details)});
-app.on("before-quit",()=>{app.isQuitting=true;finishDiagnosticSession("before-quit")});
+app.on("before-quit",()=>{app.isQuitting=true;if(!updateWorkerRequest)finishDiagnosticSession("before-quit")});
 app.on("activate",showMainWindow);
 app.on("will-quit",()=>{globalShortcut.unregisterAll();if(tray){tray.destroy();tray=null;}});
