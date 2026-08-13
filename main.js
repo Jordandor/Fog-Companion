@@ -167,9 +167,10 @@ function defaultData() {
     version:1,
     account:null,
     profile:{ name:"Игрок", platform:"Behaviour" },
-    meta:{ demo:true, lastSync:null, source:"demo" },
-    settings:{ automationEnabled:false, searchPoint:null, resultPoint:null, perkSlot1Point:null, perkSlot2Point:null, perkSlot3Point:null, perkSlot4Point:null, perkSearchPoint:null, perkResultPoint:null, wheelCooldown:3, enabledKillerIds:null, killerFilterInitialized:false },
-    randomizer:{ killer:null, perks:[], perkLocks:[false,false,false,false], killerHistory:[] },
+    meta:{ demo:true, lastSync:null, source:"demo", behaviourAuthenticated:false },
+    settings:{ automationEnabled:false, searchPoint:null, resultPoint:null, perkSlot1Point:null, perkSlot2Point:null, perkSlot3Point:null, perkSlot4Point:null, perkSearchPoint:null, perkResultPoint:null, wheelCooldown:3, perkCooldown:3, enabledKillerIds:null, enabledPerkIds:null, killerFilterInitialized:false, perkFilterInitialized:false },
+    randomizer:{ killer:null, perks:[], perkLocks:[false,false,false,false], killerHistory:[], perkHistory:[] },
+    perkCatalog:{ items:[], syncedAt:null },
     matches:[
       { id:"demo-1", startTime:now-3600, duration:812, map:"Поместье Макмиллан", gameType:"1v4", kills:4,
         player:demoParticipant("killer","Кошмар","Безжалостный убийца",32210,["Барбекю и чили","Нокаут","Выхода нет","Секущий крюк"],0),
@@ -215,6 +216,8 @@ function loadStore() {
     value.settings={...defaultData().settings,...(value.settings||{})};
     if(!value.settings.killerFilterInitialized&&Array.isArray(value.settings.enabledKillerIds)&&!value.settings.enabledKillerIds.length)value.settings.enabledKillerIds=null;
     value.randomizer={...defaultData().randomizer,...(value.randomizer||{})};
+    value.meta={...defaultData().meta,...(value.meta||{})};
+    value.perkCatalog={...defaultData().perkCatalog,...(value.perkCatalog||{})};
     return refreshMatchKillCounts(value);
   }
   catch { const value=defaultData(); writeStore(value); return value; }
@@ -473,6 +476,36 @@ async function refreshStoredProfileAvatar() {
 
 const addonIndexPages=["Фонарик (улучшения)","Аптечка (улучшения)","Ящик с инструментами (улучшения)","Карта (улучшения)","Ключ (улучшения)"];
 const wikiOrigin="https://dead-by-daylight.fandom.com";
+const killerPerkCategory="Категория:Умения Убийц";
+async function requestWikiJson(url,{attempts=3}={}){
+  let lastError;
+  for(let attempt=1;attempt<=attempts;attempt++){
+    try{
+      const response=await net.fetch(url,{headers:{"User-Agent":`Fog-Companion/${app.getVersion()}`},redirect:"follow",signal:AbortSignal.timeout(12000),bypassCustomProtocolHandlers:true});
+      if(!response.ok)throw new Error(`Каталог перков ответил ${response.status}`);
+      return await response.json();
+    }catch(error){lastError=error;logDiagnostic("warn","perk-catalog-request-retry",{attempt,error:diagnosticValue(error)});if(attempt<attempts)await sleep(attempt*450)}
+  }
+  throw lastError||new Error("Каталог перков временно недоступен");
+}
+async function getKillerPerkCatalog(){
+  const cached=Array.isArray(store.perkCatalog?.items)?store.perkCatalog.items:[];
+  if(cached.length>=100&&Date.now()-Number(store.perkCatalog.syncedAt||0)<7*24*60*60*1000){
+    if(!store.settings.perkFilterInitialized||!Array.isArray(store.settings.enabledPerkIds)){store.settings.enabledPerkIds=cached.map(item=>item.id);store.settings.perkFilterInitialized=true;writeStore(store)}
+    return cached;
+  }
+  const query=new URLSearchParams({action:"query",generator:"categorymembers",gcmtitle:killerPerkCategory,gcmtype:"page",gcmlimit:"500",prop:"pageimages",piprop:"thumbnail|original",pithumbsize:"256",format:"json",formatversion:"2",origin:"*"});
+  try{
+    const payload=await requestWikiJson(`${wikiOrigin}/ru/api.php?${query}`),pages=Array.isArray(payload?.query?.pages)?payload.query.pages:[],items=pages.map(page=>({id:`wiki-${page.pageid}`,name:String(page.title||"").trim(),image:page.thumbnail?.source||page.original?.source||""})).filter(item=>item.name&&!/^(?:Категория|Шаблон):/i.test(item.name)).sort((a,b)=>a.name.localeCompare(b.name,"ru"));
+    if(items.length<80)throw new Error(`Каталог вернул только ${items.length} перков`);
+    store.perkCatalog={items,syncedAt:Date.now()};
+    if(!store.settings.perkFilterInitialized||!Array.isArray(store.settings.enabledPerkIds)){store.settings.enabledPerkIds=items.map(item=>item.id);store.settings.perkFilterInitialized=true}
+    writeStore(store);return items;
+  }catch(error){
+    if(cached.length)return cached;
+    throw error;
+  }
+}
 async function getPerkDetails(perk,kind="Навык") {
   const name=String(perk?.name||"").trim();
   if(!name)throw new Error("Название элемента не найдено");
@@ -631,13 +664,14 @@ function importOfficial(payload,{silent=false}={}) {
   const existing=store.meta?.demo?[]:store.matches||[];
   const map=new Map(existing.map(m=>[m.id,m])); imported.forEach(m=>map.set(m.id,m));
   store.matches=[...map.values()].sort((a,b)=>b.startTime-a.startTime).slice(0,500);
-  store.meta={demo:false,lastSync:Date.now(),source:"official-stats"}; applyAuthenticatedIdentity(store); writeStore(store);
+  store.meta={...(store.meta||{}),demo:false,lastSync:Date.now(),source:"official-stats",behaviourAuthenticated:true}; applyAuthenticatedIdentity(store); writeStore(store);
   send("sync:status",{type:silent?"silent":"success",message:silent?"":`Импортировано матчей: ${imported.length}`,data:store});
   return imported.length;
 }
 
 async function importProfile(payload,{silent=false}={}) {
   if(!payload||typeof payload!=="object")return false;
+  store.meta={...(store.meta||{}),behaviourAuthenticated:true};
   const accounts=Array.isArray(payload.accounts)?payload.accounts:[];
   const account=accounts.find(item=>item.type==="steam"&&item.avatarUrl)||accounts.find(item=>item.avatarUrl)||accounts[0]||{};
   const next={
@@ -646,7 +680,7 @@ async function importProfile(payload,{silent=false}={}) {
     avatar:await currentSteamAvatar(account),
     profileUrl:account.profileUrl||""
   };
-  if(JSON.stringify(store.behaviourProfile||{})===JSON.stringify(next))return false;
+  if(JSON.stringify(store.behaviourProfile||{})===JSON.stringify(next)){writeStore(store);return false;}
   store.behaviourProfile=next;writeStore(store);
   send("sync:status",{type:silent?"silent":"info",message:silent?"":"Профиль найден. Загружаю историю матчей…",data:store});
   return true;
@@ -849,6 +883,9 @@ function openStatsSync(silent=false) {
     if(syncWindow.isDestroyed())return;
     const current=syncWindow.webContents.getURL();
     if(!current.startsWith(statsOrigin))return;
+    let authenticated=false;
+    try{authenticated=await syncWindow.webContents.executeJavaScript("(()=>{try{return Boolean(JSON.parse(localStorage.getItem('auth-store')||'{}')?.state?.authToken?.token)}catch{return false}})()") }catch{}
+    if(authenticated&&!store.meta?.behaviourAuthenticated){store.meta={...(store.meta||{}),behaviourAuthenticated:true};writeStore(store);send("sync:status",{type:"silent",message:"",data:store})}
     if(current.includes("/match-history")){
       if(!silent)send("sync:status",{type:"info",message:"Загружаю матчи, изображения и статистику персонажей…"});
       runPageFallback();
@@ -858,8 +895,6 @@ function openStatsSync(silent=false) {
       runAggregateImport();
       return;
     }
-    let authenticated=false;
-    try{authenticated=await syncWindow.webContents.executeJavaScript("(()=>{try{return Boolean(JSON.parse(localStorage.getItem('auth-store')||'{}')?.state?.authToken?.token)}catch{return false}})()") }catch{}
     if(authenticated&&redirectAttempts<3){redirectAttempts++;if(!silent)send("sync:status",{type:"info",message:"Вход выполнен. Перехожу в историю недавних матчей…"});setTimeout(()=>{if(!syncWindow.isDestroyed())syncWindow.loadURL(historyUrl);},400);}
   });
   syncWindow.on("closed",()=>{if(statsWindow===syncWindow)statsWindow=null;if(process.argv.includes("--sync-once"))setTimeout(()=>app.quit(),300);});
@@ -883,9 +918,20 @@ function openStatsSync(silent=false) {
 
 function maybeAutoSync(force=false) {
   if(!store?.account)return false;
+  if(!store.meta?.behaviourAuthenticated)return false;
   if(store.meta?.source!=="official-stats"||statsWindow)return false;
   if(!force&&Date.now()-lastAutoSyncAttempt<45000)return false;
   lastAutoSyncAttempt=Date.now();openStatsSync(true);return true;
+}
+
+async function logoutStatsAccount(){
+  if(statsWindow&&!statsWindow.isDestroyed())statsWindow.destroy();
+  statsWindow=null;
+  await session.fromPartition("persist:bhvr-stats").clearStorageData().catch(error=>logDiagnostic("warn","behaviour-session-clear-failed",error));
+  store.meta={...(store.meta||{}),behaviourAuthenticated:false};
+  writeStore(store);
+  send("sync:status",{type:"info",message:"Вы вышли из Behaviour Account. Локальная история сохранена.",data:store});
+  return store;
 }
 
 function gameRunning() {
@@ -927,6 +973,8 @@ app.whenReady().then(()=>{
   ipcMain.handle("auth:steam-login",()=>loginWithSteam());
   ipcMain.handle("auth:logout",()=>logoutAccount());
   ipcMain.handle("stats:open-sync",()=>{if(!store.account)throw new Error("Сначала войдите через Steam.");openStatsSync();return true;});
+  ipcMain.handle("stats:logout",()=>logoutStatsAccount());
+  ipcMain.handle("perks:get-catalog",async()=>({items:await getKillerPerkCatalog(),data:store}));
   ipcMain.handle("perk:get-details",async(_event,perk,kind)=>{
     try{return await getPerkDetails(perk,kind)}
     catch(error){logDiagnostic("error","item-details-load-failed",{id:perk?.id||"",name:perk?.name||"",kind,error:diagnosticValue(error)});throw error}

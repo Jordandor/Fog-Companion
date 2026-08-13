@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld("fogAPI", {
   saveRandomizer: value => ipcRenderer.invoke("randomizer:save", value),
   deleteMatch: id => ipcRenderer.invoke("data:delete-match", id),
   openStatsSync: () => ipcRenderer.invoke("stats:open-sync"),
+  logoutStats: () => ipcRenderer.invoke("stats:logout"),
+  getKillerPerks: () => ipcRenderer.invoke("perks:get-catalog"),
   getPerkDetails: (perk, kind) => ipcRenderer.invoke("perk:get-details", perk, kind),
   openExternal: url => ipcRenderer.invoke("shell:open-external", url),
   getGameStatus: () => ipcRenderer.invoke("game:status"),
