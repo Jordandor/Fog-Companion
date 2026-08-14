@@ -5,6 +5,8 @@ param(
   [Parameter(Mandatory=$true)][int]$SearchY,
   [Parameter(Mandatory=$true)][int]$ResultX,
   [Parameter(Mandatory=$true)][int]$ResultY,
+  [int]$ClearX = -1,
+  [int]$ClearY = -1,
   [string]$NamesBase64 = "",
   [int]$Slot1X = -1, [int]$Slot1Y = -1,
   [int]$Slot2X = -1, [int]$Slot2Y = -1,
@@ -62,6 +64,10 @@ if ($NamesBase64) {
     Start-Sleep -Milliseconds 110
     [FogInput]::Click($ResultX,$ResultY)
     Start-Sleep -Milliseconds 70
+    if ($ClearX -ge 0 -and $ClearY -ge 0) {
+      [FogInput]::Click($ClearX,$ClearY)
+      Start-Sleep -Milliseconds 65
+    }
   }
   exit 0
 }

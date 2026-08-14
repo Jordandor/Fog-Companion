@@ -5,11 +5,7 @@ const crypto = require("crypto");
 const http = require("http");
 const { spawn, execFile } = require("child_process");
 
-const updateWorkerFlag="--fog-apply-update";
-const updateWorkerIndex=process.argv.indexOf(updateWorkerFlag);
-let updateWorkerRequest=null;
-if(updateWorkerIndex>=0)try{updateWorkerRequest=JSON.parse(Buffer.from(String(process.argv[updateWorkerIndex+1]||""),"base64url").toString("utf8"))}catch{}
-const hasSingleInstanceLock=updateWorkerRequest?true:app.requestSingleInstanceLock();
+const hasSingleInstanceLock=app.requestSingleInstanceLock();
 if(!hasSingleInstanceLock)app.quit();
 
 const diagnosticsDir=path.join(app.getPath("userData"),"diagnostics");
@@ -18,7 +14,7 @@ const runtimeDir=path.join(app.getPath("userData"),"runtime");
 const runtimeInputHelper=path.join(runtimeDir,"input-helper.ps1");
 const sessionMarker=path.join(diagnosticsDir,"active-session.json");
 const sessionId=`${new Date().toISOString().replace(/[:.]/g,"-")}-${process.pid}`;
-if(hasSingleInstanceLock&&!updateWorkerRequest){fs.mkdirSync(crashDumpDir,{recursive:true});app.setPath("crashDumps",crashDumpDir);crashReporter.start({productName:"Fog Companion",uploadToServer:false,extra:{version:app.getVersion(),sessionId}})}
+if(hasSingleInstanceLock){fs.mkdirSync(crashDumpDir,{recursive:true});app.setPath("crashDumps",crashDumpDir);crashReporter.start({productName:"Fog Companion",uploadToServer:false,extra:{version:app.getVersion(),sessionId}})}
 
 const diagnosticValue=value=>{
   if(value instanceof Error)return{name:value.name,message:value.message,stack:value.stack};
@@ -70,7 +66,7 @@ function beginDiagnosticSession(){
 }
 function finishDiagnosticSession(reason){logDiagnostic("info","app-exit",{reason});try{if(fs.existsSync(sessionMarker))fs.unlinkSync(sessionMarker)}catch(error){logDiagnostic("error","session-marker-remove-failed",error)}}
 
-if(hasSingleInstanceLock&&!updateWorkerRequest){process.on("uncaughtException",error=>{writeCrashReport("uncaught-exception",error);app.isQuitting=true;try{app.exit(1)}catch{process.exit(1)}});process.on("unhandledRejection",reason=>writeCrashReport("unhandled-rejection",reason));beginDiagnosticSession()}
+if(hasSingleInstanceLock){process.on("uncaughtException",error=>{writeCrashReport("uncaught-exception",error);app.isQuitting=true;try{app.exit(1)}catch{process.exit(1)}});process.on("unhandledRejection",reason=>writeCrashReport("unhandled-rejection",reason));beginDiagnosticSession()}
 
 let mainWindow;
 let overlayWindow;
@@ -118,15 +114,15 @@ async function githubResponse(url,{attempts=4,timeoutMs=30000}={}){
 }
 async function latestReleaseInfo(){
   try{
-    const release=await (await githubResponse(githubLatestReleaseApi)).json(),latest=String(release?.tag_name||release?.name||"").replace(/^v/i,""),assets=Array.isArray(release?.assets)?release.assets:[],assetName=asset=>String(asset?.name||"").replace(/[._-]+/g," ").replace(/\s+/g," ").trim().toLowerCase(),executable=assets.find(asset=>assetName(asset)==="fog companion exe"),checksum=assets.find(asset=>assetName(asset)==="fog companion exe sha256");
-    if(!latest||!executable?.browser_download_url||!checksum?.browser_download_url)throw new Error("В последнем релизе отсутствуют EXE или SHA-256.");
-    return{latest,downloadUrl:executable.browser_download_url,checksumUrl:checksum.browser_download_url,source:"api"};
+    const release=await (await githubResponse(githubLatestReleaseApi)).json(),latest=String(release?.tag_name||release?.name||"").replace(/^v/i,""),assets=Array.isArray(release?.assets)?release.assets:[],assetName=asset=>String(asset?.name||"").replace(/[._-]+/g," ").replace(/\s+/g," ").trim().toLowerCase(),installer=assets.find(asset=>assetName(asset)==="fog companion setup exe"),checksum=assets.find(asset=>assetName(asset)==="fog companion setup exe sha256");
+    if(!latest||!installer?.browser_download_url||!checksum?.browser_download_url)throw new Error("В последнем релизе отсутствуют установщик или SHA-256.");
+    return{latest,downloadUrl:installer.browser_download_url,checksumUrl:checksum.browser_download_url,source:"api"};
   }catch(apiError){
     logDiagnostic("warn","update-release-api-fallback",{error:networkErrorMessage(apiError)});
     const manifest=await (await githubResponse(githubPackageManifest)).json(),latest=String(manifest?.version||"").replace(/^v/i,"");
     if(!/^\d+\.\d+\.\d+$/.test(latest))throw apiError;
     const base=`https://github.com/${githubRepository}/releases/download/v${latest}`;
-    return{latest,downloadUrl:`${base}/Fog-Companion.exe`,checksumUrl:`${base}/Fog-Companion.exe.sha256`,source:"manifest"};
+    return{latest,downloadUrl:`${base}/Fog%20Companion%20Setup.exe`,checksumUrl:`${base}/Fog%20Companion%20Setup.exe.sha256`,source:"manifest"};
   }
 }
 async function checkForUpdates(manual=false){
@@ -143,11 +139,10 @@ async function checkForUpdates(manual=false){
 }
 async function installAvailableUpdate(){
   if(updateState.status!=="available"||!updateState.downloadUrl||!updateState.checksumUrl)throw new Error("Сначала проверьте наличие обновлений.");
-  const portableExecutable=process.env.PORTABLE_EXECUTABLE_FILE;
-  if(!app.isPackaged||!portableExecutable)throw new Error("Автоустановка доступна только в portable-версии Fog Companion.");
+  if(!app.isPackaged)throw new Error("Автоустановка доступна только в собранной версии Fog Companion.");
   publishUpdateState({status:"downloading",message:`Скачиваю версию ${updateState.latestVersion}…`});
   const stagingDir=path.join(app.getPath("temp"),"fog-companion-update");fs.mkdirSync(stagingDir,{recursive:true});
-  const stagedExecutable=path.join(stagingDir,`Fog-Companion-${updateState.latestVersion}.exe`);
+  const stagedExecutable=path.join(stagingDir,`Fog Companion Setup ${updateState.latestVersion}.exe`);
   try{
     const [binaryResponse,checksumResponse]=await Promise.all([githubResponse(updateState.downloadUrl),githubResponse(updateState.checksumUrl)]),binary=Buffer.from(await binaryResponse.arrayBuffer()),checksumText=await checksumResponse.text(),expected=(checksumText.match(/\b[a-f0-9]{64}\b/i)||[])[0]?.toUpperCase();
     if(!expected)throw new Error("Релиз не содержит корректную контрольную сумму.");
@@ -155,43 +150,18 @@ async function installAvailableUpdate(){
     if(actual!==expected)throw new Error("Контрольная сумма обновления не совпала. Установка отменена.");
     fs.writeFileSync(stagedExecutable,binary);
     publishUpdateState({status:"installing",message:"Обновление проверено. Запускаю установщик…"});
-    logDiagnostic("info","update-worker-starting",{fromVersion:app.getVersion(),toVersion:updateState.latestVersion,source:stagedExecutable,destination:portableExecutable});
-    const workerPayload=Buffer.from(JSON.stringify({source:stagedExecutable,destination:portableExecutable,expected,previousPid:process.pid,version:updateState.latestVersion}),"utf8").toString("base64url");
-    const child=spawn(stagedExecutable,[updateWorkerFlag,workerPayload],{detached:true,stdio:"ignore",windowsHide:true});
+    const installedExecutable=process.execPath,updateLog=path.join(diagnosticsDir,"update-install.log"),psQuote=value=>`'${String(value).replace(/'/g,"''")}'`;
+    const updateScript=`$ErrorActionPreference='Stop'\n$oldPid=${process.pid}\n$setup=${psQuote(stagedExecutable)}\n$target=${psQuote(installedExecutable)}\n$log=${psQuote(updateLog)}\ntry {\n  "$(Get-Date -Format o) waiting for PID $oldPid" | Out-File -LiteralPath $log -Encoding utf8\n  $deadline=(Get-Date).AddMinutes(2)\n  while(Get-Process -Id $oldPid -ErrorAction SilentlyContinue){if((Get-Date)-gt $deadline){throw 'Fog Companion did not close in time.'};Start-Sleep -Milliseconds 350}\n  "$(Get-Date -Format o) starting installer $setup" | Add-Content -LiteralPath $log -Encoding utf8\n  $installer=Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru -WindowStyle Hidden\n  if($installer.ExitCode -ne 0){throw "Installer exit code: $($installer.ExitCode)"}\n  Start-Sleep -Milliseconds 900\n  if(!(Test-Path -LiteralPath $target)){throw "Installed executable not found: $target"}\n  "$(Get-Date -Format o) relaunching $target" | Add-Content -LiteralPath $log -Encoding utf8\n  Start-Process -FilePath $target -WindowStyle Hidden\n} catch {\n  "$(Get-Date -Format o) $($_ | Out-String)" | Add-Content -LiteralPath $log -Encoding utf8\n  exit 1\n}`;
+    logDiagnostic("info","update-installer-starting",{fromVersion:app.getVersion(),toVersion:updateState.latestVersion,installer:stagedExecutable,target:installedExecutable});
+    const encodedCommand=Buffer.from(updateScript,"utf16le").toString("base64");
+    const child=spawn("powershell.exe",["-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-EncodedCommand",encodedCommand],{detached:true,stdio:"ignore",windowsHide:true});
     await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error("Не удалось запустить установщик обновления.")),8000);child.once("spawn",()=>{clearTimeout(timer);resolve()});child.once("error",error=>{clearTimeout(timer);reject(error)})});
     child.unref();
-    publishUpdateState({status:"installing",message:"Установщик запущен. Перезапускаю Companion…"});
+    publishUpdateState({status:"installing",message:"Установщик запущен. Companion закроется и откроется уже обновлённым…"});
     app.isQuitting=true;
     setTimeout(()=>app.quit(),250);
     return true;
   }catch(error){logDiagnostic("error","update-install-failed",{error:diagnosticValue(error)});publishUpdateState({status:"available",message:`Не удалось установить обновление: ${error.message}`});throw error}
-}
-
-async function runUpdateWorker(request){
-  const source=path.resolve(String(request?.source||"")),destination=path.resolve(String(request?.destination||"")),expected=String(request?.expected||"").toUpperCase(),backup=`${destination}.previous`,deadline=Date.now()+90000;
-  if(!source||!destination||!/^[A-F0-9]{64}$/.test(expected))throw new Error("Некорректные параметры установщика обновления.");
-  const sourceHash=crypto.createHash("sha256").update(fs.readFileSync(source)).digest("hex").toUpperCase();
-  if(sourceHash!==expected)throw new Error("Контрольная сумма скачанного обновления не совпала.");
-  logDiagnostic("info","update-worker-ready",{source,destination,previousPid:request.previousPid,version:request.version});
-  let lastError=null,backupReady=false;
-  while(Date.now()<deadline){
-    try{
-      if(!backupReady&&fs.existsSync(destination)){fs.copyFileSync(destination,backup);backupReady=true}
-      fs.copyFileSync(source,destination);
-      const installed=crypto.createHash("sha256").update(fs.readFileSync(destination)).digest("hex").toUpperCase();
-      if(installed!==expected)throw new Error("Проверка установленного portable-файла не прошла.");
-      logDiagnostic("info","update-worker-installed",{destination,backup:backupReady?backup:"",version:request.version});
-      await new Promise(resolve=>setTimeout(resolve,1500));
-      logDiagnostic("info","update-worker-relaunching",{destination,version:request.version});
-      const relaunched=spawn(destination,[],{detached:true,stdio:"ignore",windowsHide:true});
-      await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error("Новая версия не запустилась после установки.")),8000);relaunched.once("spawn",()=>{clearTimeout(timer);resolve()});relaunched.once("error",error=>{clearTimeout(timer);reject(error)})});
-      relaunched.unref();
-      logDiagnostic("info","update-worker-relaunched",{destination,version:request.version});
-      return true;
-    }catch(error){lastError=error;await new Promise(resolve=>setTimeout(resolve,500))}
-  }
-  if(backupReady&&fs.existsSync(backup))try{fs.copyFileSync(backup,destination)}catch{}
-  throw lastError||new Error("Portable-файл оставался занят дольше 90 секунд.");
 }
 
 function demoParticipant(role, character, result, score, perks, number) {
@@ -206,7 +176,7 @@ function defaultData() {
     account:null,
     profile:{ name:"Игрок", platform:"Behaviour" },
     meta:{ demo:true, lastSync:null, source:"demo", behaviourAuthenticated:false },
-    settings:{ automationEnabled:false, searchPoint:null, resultPoint:null, perkSlot1Point:null, perkSlot2Point:null, perkSlot3Point:null, perkSlot4Point:null, perkSearchPoint:null, perkResultPoint:null, wheelCooldown:3, perkCooldown:3, enabledKillerIds:null, enabledPerkIds:null, killerFilterInitialized:false, perkFilterInitialized:false },
+    settings:{ automationEnabled:false, searchPoint:null, resultPoint:null, perkSlot1Point:null, perkSlot2Point:null, perkSlot3Point:null, perkSlot4Point:null, perkSearchPoint:null, perkResultPoint:null, perkClearPoint:null, wheelCooldown:3, perkCooldown:3, enabledKillerIds:null, enabledPerkIds:null, killerFilterInitialized:false, perkFilterInitialized:false },
     randomizer:{ killer:null, perks:[], perkLocks:[false,false,false,false], killerHistory:[], perkHistory:[] },
     perkCatalog:{ items:[], syncedAt:null },
     matches:[
@@ -851,13 +821,27 @@ async function toggleOverlay() {
 function openStatsSync(silent=false) {
   if(statsWindow&&!statsWindow.isDestroyed()){if(!silent){statsWindow.show();statsWindow.focus();}return;}
   const syncWindow=new BrowserWindow({
-    width:1240,height:860,show:!silent,title:"Вход в официальный DBD Stats Tracker",backgroundColor:"#111216",icon:appIcon(),
+    width:1240,height:860,show:!silent,title:"Вход в официальный DBD Stats Tracker",autoHideMenuBar:true,backgroundColor:"#111216",icon:appIcon(),
     webPreferences:{partition:"persist:bhvr-stats",contextIsolation:true,nodeIntegration:false,sandbox:true}
   });
   statsWindow=syncWindow;
-  syncWindow.webContents.setWindowOpenHandler(()=>({action:"allow",overrideBrowserWindowOptions:{parent:syncWindow,webPreferences:{partition:"persist:bhvr-stats",contextIsolation:true,nodeIntegration:false,sandbox:true}}}));
   const historyUrl=`${statsOrigin}/ru/match-history/`;
   const statisticsUrl=`${statsOrigin}/ru/statistics/`;
+  const isStaticResourceNavigation=value=>{try{return /\.(?:css|js|mjs|map|json|woff2?|ttf|otf|png|jpe?g|gif|webp|svg|ico)(?:$|[?#])/i.test(new URL(value).pathname)}catch{return true}};
+  const navigateDocument=value=>{
+    if(syncWindow.isDestroyed()||!/^https?:/i.test(String(value||""))||isStaticResourceNavigation(value)){
+      logDiagnostic("warn","stats-non-document-navigation-blocked",{url:String(value||"")});
+      return;
+    }
+    syncWindow.loadURL(value).catch(error=>logDiagnostic("warn","stats-navigation-failed",{url:value,error:diagnosticValue(error)}));
+  };
+  syncWindow.webContents.setWindowOpenHandler(({url})=>{setImmediate(()=>navigateDocument(url));return{action:"deny"}});
+  syncWindow.webContents.on("will-navigate",(event,url)=>{
+    if(!isStaticResourceNavigation(url))return;
+    event.preventDefault();
+    logDiagnostic("warn","stats-static-resource-navigation-blocked",{url});
+    if(!silent)send("sync:status",{type:"error",message:"Официальный трекер попытался открыть технический ресурс вместо страницы. Переход отменён — повторите синхронизацию."});
+  });
   const pendingResponses=new Map();
   let redirectAttempts=0;
   let importedHistory=false;
@@ -1040,10 +1024,10 @@ function runHelper(points){return new Promise((resolve,reject)=>{
   child.on("error",error=>{if(settled)return;settled=true;writeCrashReport("selection-helper-spawn-error",error,{scriptPath});reject(error)});
   child.on("exit",code=>{if(settled)return;settled=true;const out=decodePowerShellOutput(stdout),err=decodePowerShellOutput(stderr);logDiagnostic(code===0?"info":"error","selection-helper-exit",{code,durationMs:Date.now()-startedAt,stdout:out,stderr:err,scriptPath});code===0?resolve():reject(new Error(err||out||`PowerShell завершился с кодом ${code}`))});
 });}
-function runPerkHelper(perks,slotPoints,search,result){return new Promise((resolve,reject)=>{
-  const startedAt=Date.now(),scriptPath=ensureInputHelper(),namesBase64=Buffer.from(JSON.stringify(perks.map(perk=>perk.name)),"utf8").toString("base64"),args=["-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",scriptPath,"-SearchX",String(search.x),"-SearchY",String(search.y),"-ResultX",String(result.x),"-ResultY",String(result.y),"-NamesBase64",namesBase64];
-  slotPoints.forEach((point,index)=>args.push(`-Slot${index+1}X`,String(point.x),`-Slot${index+1}Y`,String(point.y)));
-  logDiagnostic("info","perk-selection-helper-started",{scriptPath,perks:perks.map(perk=>perk.name)});
+function runPerkHelper(selections,search,result,clear){return new Promise((resolve,reject)=>{
+  const startedAt=Date.now(),scriptPath=ensureInputHelper(),namesBase64=Buffer.from(JSON.stringify(selections.map(selection=>selection.perk.name)),"utf8").toString("base64"),args=["-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",scriptPath,"-SearchX",String(search.x),"-SearchY",String(search.y),"-ResultX",String(result.x),"-ResultY",String(result.y),"-ClearX",String(clear.x),"-ClearY",String(clear.y),"-NamesBase64",namesBase64];
+  selections.forEach((selection,index)=>args.push(`-Slot${index+1}X`,String(selection.point.x),`-Slot${index+1}Y`,String(selection.point.y)));
+  logDiagnostic("info","perk-selection-helper-started",{scriptPath,selections:selections.map(selection=>({slot:selection.index+1,perk:selection.perk.name}))});
   const child=spawn("powershell.exe",args,{windowsHide:true,stdio:["ignore","pipe","pipe"]}),stdout=[],stderr=[];let settled=false;
   child.stdout.on("data",chunk=>stdout.push(Buffer.from(chunk)));child.stderr.on("data",chunk=>stderr.push(Buffer.from(chunk)));
   child.on("error",error=>{if(settled)return;settled=true;writeCrashReport("perk-selection-helper-spawn-error",error,{scriptPath});reject(error)});
@@ -1051,15 +1035,6 @@ function runPerkHelper(perks,slotPoints,search,result){return new Promise((resol
 });}
 
 app.whenReady().then(()=>{
-  if(updateWorkerRequest){
-    runUpdateWorker(updateWorkerRequest).then(()=>app.exit(0)).catch(error=>{
-      writeCrashReport("update-worker-failed",error,updateWorkerRequest);
-      const fallback=String(updateWorkerRequest.destination||"");
-      if(fallback&&fs.existsSync(fallback))try{const child=spawn(fallback,[],{detached:true,stdio:"ignore",windowsHide:true});child.unref()}catch{}
-      app.exit(1);
-    });
-    return;
-  }
   app.setAppUserModelId("local.fogcompanion.desktop");
   setTimeout(()=>{try{fs.rmSync(path.join(app.getPath("temp"),"fog-companion-update"),{recursive:true,force:true})}catch{}},7000);
   try{ensureInputHelper()}catch(error){logDiagnostic("error","selection-helper-prepare-failed",{error:diagnosticValue(error)})}
@@ -1113,17 +1088,20 @@ app.whenReady().then(()=>{
   ipcMain.handle("game:select-perks",async(_e,payload)=>{
     if(!store.account)throw new Error("Сначала войдите в Fog Companion через Steam.");
     if(!store.settings?.automationEnabled)throw new Error("Включите автоматический выбор в настройках Companion.");
-    const {perks,slotPoints,searchPoint,resultPoint}=payload||{},selected=(perks||[]).filter(perk=>perk?.name);
-    if(selected.length!==4||!Array.isArray(slotPoints)||slotPoints.length!==4||slotPoints.some(point=>!point)||!searchPoint||!resultPoint)throw new Error("Сначала выберите четыре перка и откалибруйте шесть точек автовыбора.");
+    const {perks,perkLocks,slotPoints,searchPoint,resultPoint,clearPoint}=payload||{},allPerks=Array.isArray(perks)?perks:[],locks=Array.isArray(perkLocks)?perkLocks:[],points=Array.isArray(slotPoints)?slotPoints:[];
+    if(allPerks.length!==4||allPerks.some(perk=>!perk?.name))throw new Error("Сначала выберите четыре перка.");
+    const selections=allPerks.map((perk,index)=>({perk,index,point:points[index]})).filter(selection=>!locks[selection.index]);
+    if(!selections.length)throw new Error("Все четыре перка закреплены — выбирать в DBD нечего.");
+    if(selections.some(selection=>!selection.point)||!searchPoint||!resultPoint||!clearPoint)throw new Error("Откалибруйте нужные слоты, поле поиска, первый результат и кнопку очистки.");
     if(!await gameRunning())throw new Error("Dead by Daylight не запущен. Откройте игру и экран перков.");
     const oldClipboard=clipboard.readText();
     if(overlayWindow&&!overlayWindow.isDestroyed())overlayWindow.hide();
     try{
-      await runPerkHelper(selected,slotPoints,searchPoint,resultPoint);
-      logDiagnostic("info","perk-selection-complete",{perks:selected.map(perk=>perk.name)});
+      await runPerkHelper(selections,searchPoint,resultPoint,clearPoint);
+      logDiagnostic("info","perk-selection-complete",{selections:selections.map(selection=>({slot:selection.index+1,perk:selection.perk.name}))});
       return true;
     }catch(error){
-      const report=writeCrashReport("perk-selection-failed",error,{perks:selected.map(perk=>perk.name)});
+      const report=writeCrashReport("perk-selection-failed",error,{selections:selections.map(selection=>({slot:selection.index+1,perk:selection.perk.name}))});
       const visibleError=new Error("Автовыбор перков не сработал. Отчёт сохранён в папке диагностики.");visibleError.report=report;throw visibleError;
     }finally{clipboard.writeText(oldClipboard);}
   });
@@ -1139,6 +1117,6 @@ app.whenReady().then(()=>{
 
 app.on("render-process-gone",(_event,webContents,details)=>{if(!app.isQuitting&&details.reason!=="clean-exit")logDiagnostic("error","render-process-gone",{url:webContents?.getURL?.()||"",...details})});
 app.on("child-process-gone",(_event,details)=>{if(!app.isQuitting&&details.reason!=="clean-exit")writeCrashReport("child-process-gone",new Error(`Child process: ${details.reason}`),details)});
-app.on("before-quit",()=>{app.isQuitting=true;if(!updateWorkerRequest)finishDiagnosticSession("before-quit")});
+app.on("before-quit",()=>{app.isQuitting=true;finishDiagnosticSession("before-quit")});
 app.on("activate",showMainWindow);
 app.on("will-quit",()=>{globalShortcut.unregisterAll();if(tray){tray.destroy();tray=null;}});
