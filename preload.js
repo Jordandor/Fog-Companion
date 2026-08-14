@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld("fogAPI", {
   maximize: () => ipcRenderer.send("window:maximize"),
   close: () => ipcRenderer.send("window:close"),
   hideOverlay: () => ipcRenderer.send("overlay:hide"),
+  setOverlayHover: hovered => ipcRenderer.send("overlay:hover", Boolean(hovered)),
   onSyncStatus: callback => ipcRenderer.on("sync:status", (_event, value) => callback(value)),
   onAuthStatus: callback => ipcRenderer.on("auth:status", (_event, value) => callback(value)),
   onGameStatus: callback => ipcRenderer.on("game:selection-status", (_event, value) => callback(value)),

@@ -532,10 +532,10 @@
 }
 
 /* Killer result portrait. */
-.wheel-result-portrait { position: relative; width: 180px; height: 210px; margin: 0 auto 18px; overflow: hidden; border: 1px solid rgba(198,23,33,.38); border-radius: 9px; background: radial-gradient(circle at 50% 34%,#37323a,#111216 72%); box-shadow: 0 18px 38px rgba(0,0,0,.42); isolation:isolate; }
+.wheel-result-portrait { position: relative; width: 232px; height: 270px; margin: 0 auto 18px; overflow: hidden; border: 1px solid rgba(198,23,33,.52); border-radius: 9px; background: radial-gradient(circle at 50% 34%,#37323a,#111216 72%); box-shadow: 0 18px 38px rgba(0,0,0,.42); isolation:isolate; }
 .wheel-result-portrait img { position:relative; z-index:1; width: 100%; height: 100%; object-fit: cover; object-position: center top; transform:scale(1.025); }
 .wheel-result-portrait::after { content:""; position:absolute; z-index:4; inset:0; pointer-events:none; background:radial-gradient(ellipse at center,transparent 57%,rgba(10,11,13,.09) 75%,rgba(10,11,13,.34) 100%),linear-gradient(0deg,rgba(10,11,13,.36),transparent 20%); box-shadow:inset 0 0 10px rgba(4,5,7,.46); }
-.portrait-fog-canvas { position:absolute; z-index:3; inset:0; display:block; width:100%; height:100%; pointer-events:none; opacity:.88; }
+.portrait-fog-canvas { position:absolute; z-index:3; inset:0; display:block; width:100%; height:100%; pointer-events:none; opacity:.82; }
 .wheel-result-portrait.mystery .portrait-fog-canvas { opacity:0; }
 .wheel-result-portrait > span { position: absolute; z-index: 1; inset: 0; display: grid; place-items: center; color: rgba(239,233,229,.65); font-family: Georgia,serif; font-size: 88px; text-shadow: 0 5px 18px #000; }
 .wheel-result-portrait:not(.mystery) > span { display: none; }
@@ -592,12 +592,16 @@
 
 /* Randomizer controls shared by the launcher and in-game overlay. */
 .wheel-header-actions { display:flex; gap:7px; }
-.wheel-dialog { display:flex; flex-direction:column; width:min(1120px,96vw); height:min(930px,96vh); min-height:min(760px,96vh); max-height:96vh; overflow:hidden!important; overscroll-behavior:none; }
+.wheel-dialog { display:flex; flex-direction:column; width:min(1040px,96vw); height:auto; min-height:0; max-height:96vh; overflow:hidden!important; overscroll-behavior:none; transition:width .22s ease,height .22s ease; }
 .wheel-dialog > header,.randomizer-tabs { flex:none; }
 .wheel-stage canvas { transform-origin:50% 50%; will-change:transform; backface-visibility:hidden; contain:strict; }
 .wheel-stage::before { content:""; position:absolute; z-index:0; inset:4%; border-radius:50%; pointer-events:none; box-shadow:0 16px 30px rgba(0,0,0,.43),0 0 18px rgba(136,25,33,.16); }
 .wheel-stage canvas { position:relative; z-index:1; }
 .wheel-stage .wheel-pointer,.wheel-stage .wheel-core { z-index:2; }
+.wheel-dialog:not(:has(.randomizer-settings-host:not([hidden]))) .wheel-layout { grid-template-columns:500px minmax(330px,1fr); gap:24px; padding:18px 28px 24px; }
+.wheel-dialog:not(:has(.randomizer-settings-host:not([hidden]))) .wheel-stage { width:480px; height:480px; }
+.wheel-dialog:not(:has(.randomizer-settings-host:not([hidden]))) .wheel-stage canvas { width:470px; height:470px; }
+.wheel-dialog:not(:has(.randomizer-settings-host:not([hidden]))) .wheel-core { width:104px; height:104px; border-width:8px; font-size:14px; }
 .randomizer-tabs { position:relative; z-index:4; display:flex; justify-content:center; gap:5px; min-height:48px; padding:10px 22px 0; background:#111217; }
 .randomizer-tabs button { min-width:115px; padding:8px 14px; border:1px solid var(--line); border-radius:6px; background:#18191e; color:#77737a; cursor:pointer; }
 .randomizer-tabs button.active { border-color:rgba(215,46,54,.48); background:linear-gradient(#8f2028,#54151a); color:#fff; }
@@ -672,10 +676,17 @@
 .perk-randomizer-actions button:disabled { opacity:.45; filter:grayscale(1); cursor:not-allowed; }
 .wheel-dialog [hidden] { display:none!important; }
 .wheel-dialog:has(.randomizer-settings-host:not([hidden])) .randomizer-settings-host { min-height:310px; max-height:310px; }
+.wheel-dialog:has(.randomizer-settings-host:not([hidden])) { width:min(1120px,96vw); height:min(930px,96vh); min-height:min(760px,96vh); }
 .wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-layout { grid-template-columns:440px 1fr; gap:20px; padding:10px 22px 14px; }
 .wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-stage { width:420px; height:420px; }
 .wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-stage canvas { width:410px; height:410px; }
 .wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-core { width:94px; height:94px; border-width:7px; font-size:13px; }
 .killer-card-grid { flex:1 1 auto; min-height:0; max-height:none; }
-@media(max-height:860px){.wheel-dialog{height:96vh;min-height:0}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .randomizer-settings-host{min-height:245px;max-height:245px}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-layout{grid-template-columns:370px 1fr;padding:7px 22px 10px}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-stage{width:350px;height:350px}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-stage canvas{width:340px;height:340px}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-core{width:82px;height:82px}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-result-portrait{width:120px;height:135px;margin-bottom:8px}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-result strong{font-size:23px}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-result p{margin:6px 0}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-result button{margin-top:6px}}
+@media(max-height:860px){.wheel-dialog:has(.randomizer-settings-host:not([hidden])){height:96vh;min-height:0}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .randomizer-settings-host{min-height:245px;max-height:245px}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-layout{grid-template-columns:370px 1fr;padding:7px 22px 10px}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-stage{width:350px;height:350px}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-stage canvas{width:340px;height:340px}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-core{width:82px;height:82px}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-result-portrait{width:150px;height:174px;margin-bottom:8px}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-result strong{font-size:23px}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-result p{margin:6px 0}.wheel-dialog:has(.randomizer-settings-host:not([hidden])) .wheel-result button{margin-top:6px}}
 @media(max-width:1200px){.killer-toggle-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.killer-card-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.random-perk-image{width:92px;height:92px}}
+
+/* The overview randomizer card is the single, calm entry point. */
+.wheel-promo#openWheel { cursor:pointer; transition:border-color .18s ease,transform .18s ease,box-shadow .18s ease; }
+.wheel-promo#openWheel:hover { transform:translateY(-2px); border-color:rgba(215,46,54,.42); box-shadow:0 20px 38px rgba(0,0,0,.28),0 0 22px rgba(154,27,35,.12); }
+.wheel-promo#openWheel:focus-visible { outline:2px solid rgba(224,62,71,.72); outline-offset:3px; }
+.wheel-promo#openWheel .mini-wheel { cursor:pointer; }

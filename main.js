@@ -70,6 +70,13 @@ if(hasSingleInstanceLock){process.on("uncaughtException",error=>{writeCrashRepor
 
 let mainWindow;
 let overlayWindow;
+let overlayRequestedVisible=false;
+let overlayAnimationToken=0;
+let overlayOpacityToken=0;
+let overlayTracker=null;
+let overlayTrackerBuffer="";
+let overlayGameBounds=null;
+let overlayBoundsWaiters=[];
 let statsWindow;
 let steamAuthWindow;
 let steamAuthPromise;
@@ -784,11 +791,41 @@ function createTray(){
 
 app.on("second-instance",showMainWindow);
 
-function positionOverlay() {
-  if(!overlayWindow||overlayWindow.isDestroyed())return;
-  const display=screen.getDisplayNearestPoint(screen.getCursorScreenPoint()),area=display.workArea;
-  const [width,height]=overlayWindow.getSize();
-  overlayWindow.setPosition(area.x+area.width-width-22,area.y+Math.max(22,Math.round((area.height-height)/2)),false);
+function fallbackOverlayBounds(){const area=screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;return{x:area.x,y:area.y,width:area.width,height:area.height}}
+function overlayPositions(bounds=overlayGameBounds||fallbackOverlayBounds()){
+  const [width,height]=overlayWindow.getSize(),margin=18,right=bounds.x+bounds.width,availableHeight=Math.max(0,bounds.height-height);
+  return{visible:{x:Math.max(bounds.x+6,right-width-margin),y:bounds.y+Math.max(8,Math.round(availableHeight/2))},hidden:{x:right+12,y:bounds.y+Math.max(8,Math.round(availableHeight/2))}};
+}
+function notifyOverlayBounds(bounds){
+  overlayGameBounds=bounds;const waiters=overlayBoundsWaiters;overlayBoundsWaiters=[];waiters.forEach(resolve=>resolve(bounds));
+  if(overlayRequestedVisible&&overlayWindow&&!overlayWindow.isDestroyed()&&overlayWindow.isVisible()&&!overlayWindow.__sliding){const target=overlayPositions(bounds).visible;overlayWindow.setPosition(target.x,target.y,false)}
+}
+function startOverlayTracker(){
+  if(overlayTracker&&!overlayTracker.killed)return;
+  const script=`Add-Type -TypeDefinition @'\nusing System;\nusing System.Runtime.InteropServices;\npublic static class FogOverlayWindow {\n  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }\n  [DllImport(\"user32.dll\")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);\n}\n'@\nwhile($true){\n  $game=Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match 'DeadByDaylight' -and $_.MainWindowHandle -ne 0 } | Select-Object -First 1\n  if($game){$rect=New-Object FogOverlayWindow+RECT;if([FogOverlayWindow]::GetWindowRect($game.MainWindowHandle,[ref]$rect)){Write-Output \"$($rect.Left),$($rect.Top),$($rect.Right-$rect.Left),$($rect.Bottom-$rect.Top)\"}}\n  Start-Sleep -Milliseconds 500\n}`;
+  const encoded=Buffer.from(script,"utf16le").toString("base64");overlayTrackerBuffer="";
+  const tracker=spawn("powershell.exe",["-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-EncodedCommand",encoded],{windowsHide:true,stdio:["ignore","pipe","ignore"]});overlayTracker=tracker;
+  tracker.stdout.setEncoding("utf8");tracker.stdout.on("data",chunk=>{overlayTrackerBuffer+=chunk;const lines=overlayTrackerBuffer.split(/\r?\n/);overlayTrackerBuffer=lines.pop()||"";for(const line of lines){const values=line.trim().split(",").map(Number);if(values.length===4&&values.every(Number.isFinite)&&values[2]>0&&values[3]>0)notifyOverlayBounds({x:values[0],y:values[1],width:values[2],height:values[3]})}});
+  tracker.on("error",error=>logDiagnostic("warn","overlay-window-tracker-error",error));tracker.on("exit",()=>{if(overlayTracker===tracker){overlayTracker=null;overlayTrackerBuffer=""}});
+}
+function stopOverlayTracker(){if(overlayTracker&&!overlayTracker.killed)overlayTracker.kill();overlayTracker=null;overlayTrackerBuffer="";overlayBoundsWaiters=[]}
+function waitForOverlayBounds(timeout=900){if(overlayGameBounds)return Promise.resolve(overlayGameBounds);return new Promise(resolve=>{const done=bounds=>{clearTimeout(timer);resolve(bounds)};const timer=setTimeout(()=>{overlayBoundsWaiters=overlayBoundsWaiters.filter(item=>item!==done);resolve(fallbackOverlayBounds())},timeout);overlayBoundsWaiters.push(done)})}
+function animateOverlayPosition(target,duration=270){
+  if(!overlayWindow||overlayWindow.isDestroyed())return Promise.resolve(false);const token=++overlayAnimationToken,[startX,startY]=overlayWindow.getPosition(),started=Date.now();overlayWindow.__sliding=true;
+  return new Promise(resolve=>{const frame=()=>{if(token!==overlayAnimationToken||!overlayWindow||overlayWindow.isDestroyed()){resolve(false);return}const progress=Math.min(1,(Date.now()-started)/duration),eased=1-Math.pow(1-progress,3),x=Math.round(startX+(target.x-startX)*eased),y=Math.round(startY+(target.y-startY)*eased);overlayWindow.setPosition(x,y,false);if(progress<1)setTimeout(frame,16);else{overlayWindow.__sliding=false;resolve(true)}};frame()});
+}
+function animateOverlayOpacity(target,duration=170){
+  if(!overlayWindow||overlayWindow.isDestroyed()||!overlayWindow.isVisible())return;const token=++overlayOpacityToken,start=overlayWindow.getOpacity(),started=Date.now();
+  const frame=()=>{if(token!==overlayOpacityToken||!overlayWindow||overlayWindow.isDestroyed()||!overlayWindow.isVisible())return;const progress=Math.min(1,(Date.now()-started)/duration),eased=1-Math.pow(1-progress,2);overlayWindow.setOpacity(start+(target-start)*eased);if(progress<1)setTimeout(frame,16)};frame();
+}
+async function hideOverlay({immediate=false}={}){
+  overlayRequestedVisible=false;++overlayOpacityToken;if(!overlayWindow||overlayWindow.isDestroyed())return;overlayWindow.setIgnoreMouseEvents(true);
+  if(immediate||!overlayWindow.isVisible()){++overlayAnimationToken;overlayWindow.hide();stopOverlayTracker();return}
+  const target=overlayPositions().hidden;await animateOverlayPosition(target,240);if(!overlayRequestedVisible&&overlayWindow&&!overlayWindow.isDestroyed()){overlayWindow.hide();stopOverlayTracker()}
+}
+async function showOverlay(){
+  overlayRequestedVisible=true;startOverlayTracker();const bounds=await waitForOverlayBounds();if(!overlayRequestedVisible||!overlayWindow||overlayWindow.isDestroyed())return;
+  const positions=overlayPositions(bounds);overlayWindow.setPosition(positions.hidden.x,positions.hidden.y,false);overlayWindow.setOpacity(.28);overlayWindow.setIgnoreMouseEvents(false);overlayWindow.showInactive();overlayWindow.webContents.send("overlay:shown",store);await animateOverlayPosition(positions.visible,280);
 }
 
 function createOverlayWindow() {
@@ -800,22 +837,19 @@ function createOverlayWindow() {
   overlayWindow.setAlwaysOnTop(true,"screen-saver");
   overlayWindow.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
   overlayWindow.loadFile("overlay.html");
-  overlayWindow.on("close",event=>{if(!app.isQuitting){event.preventDefault();overlayWindow.hide();}});
+  overlayWindow.on("close",event=>{if(!app.isQuitting){event.preventDefault();hideOverlay();}});
   overlayWindow.webContents.on("render-process-gone",(_event,details)=>{if(!app.isQuitting&&details.reason!=="clean-exit")writeCrashReport("overlay-render-process-gone",new Error(`Overlay renderer: ${details.reason}`),details)});
 }
 
 async function toggleOverlay() {
   if(!store?.account){showMainWindow();send("auth:status",{type:"error",message:"Сначала войдите в Fog Companion через Steam."});return;}
   if(!overlayWindow||overlayWindow.isDestroyed())createOverlayWindow();
-  if(overlayWindow.isVisible()){overlayWindow.hide();return;}
+  if(overlayRequestedVisible||overlayWindow.isVisible()){await hideOverlay();return;}
   if(!await gameRunning()){
     send("game:selection-status",{type:"error",message:"Оверлей Shift+F2 доступен только при запущенном Dead by Daylight."});
     return;
   }
-  positionOverlay();
-  overlayWindow.show();
-  overlayWindow.focus();
-  overlayWindow.webContents.send("overlay:shown",store);
+  await showOverlay();
 }
 
 function openStatsSync(silent=false) {
@@ -1025,8 +1059,7 @@ function runHelper(points){return new Promise((resolve,reject)=>{
   child.on("exit",code=>{if(settled)return;settled=true;const out=decodePowerShellOutput(stdout),err=decodePowerShellOutput(stderr);logDiagnostic(code===0?"info":"error","selection-helper-exit",{code,durationMs:Date.now()-startedAt,stdout:out,stderr:err,scriptPath});code===0?resolve():reject(new Error(err||out||`PowerShell завершился с кодом ${code}`))});
 });}
 function runPerkHelper(selections,search,result,clear){return new Promise((resolve,reject)=>{
-  const startedAt=Date.now(),scriptPath=ensureInputHelper(),namesBase64=Buffer.from(JSON.stringify(selections.map(selection=>selection.perk.name)),"utf8").toString("base64"),args=["-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",scriptPath,"-SearchX",String(search.x),"-SearchY",String(search.y),"-ResultX",String(result.x),"-ResultY",String(result.y),"-ClearX",String(clear.x),"-ClearY",String(clear.y),"-NamesBase64",namesBase64];
-  selections.forEach((selection,index)=>args.push(`-Slot${index+1}X`,String(selection.point.x),`-Slot${index+1}Y`,String(selection.point.y)));
+  const startedAt=Date.now(),scriptPath=ensureInputHelper(),selectionPayload=selections.map(selection=>({slot:selection.index+1,name:selection.perk.name,x:selection.point.x,y:selection.point.y})),selectionsBase64=Buffer.from(JSON.stringify(selectionPayload),"utf8").toString("base64"),args=["-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",scriptPath,"-SearchX",String(search.x),"-SearchY",String(search.y),"-ResultX",String(result.x),"-ResultY",String(result.y),"-ClearX",String(clear.x),"-ClearY",String(clear.y),"-SelectionsBase64",selectionsBase64];
   logDiagnostic("info","perk-selection-helper-started",{scriptPath,selections:selections.map(selection=>({slot:selection.index+1,perk:selection.perk.name}))});
   const child=spawn("powershell.exe",args,{windowsHide:true,stdio:["ignore","pipe","pipe"]}),stdout=[],stderr=[];let settled=false;
   child.stdout.on("data",chunk=>stdout.push(Buffer.from(chunk)));child.stderr.on("data",chunk=>stderr.push(Buffer.from(chunk)));
@@ -1080,7 +1113,7 @@ app.whenReady().then(()=>{
     if(!killer||!searchPoint||!resultPoint)throw new Error("Сначала откалибруйте поле поиска и первую карточку результата.");
     let running=await gameRunning();
     if(!running){send("game:selection-status",{type:"info",message:"Запускаю Dead by Daylight через Steam…"});await shell.openExternal("steam://rungameid/381210");running=await waitForGame();if(!running)throw new Error("Игра не запустилась за 3 минуты.");send("game:selection-status",{type:"info",message:"Игра запущена. Жду загрузку лобби…"});await sleep(35000);}
-    const oldClipboard=clipboard.readText();clipboard.writeText(killer.search||killer.name);if(overlayWindow&&!overlayWindow.isDestroyed())overlayWindow.hide();await sleep(25);
+    const oldClipboard=clipboard.readText();clipboard.writeText(killer.search||killer.name);await hideOverlay({immediate:true});await sleep(25);
     try{await runHelper({search:searchPoint,result:resultPoint});logDiagnostic("info","killer-selection-complete",{killer:killer.name});return true;}
     catch(error){const report=writeCrashReport("killer-selection-failed",error,{killer:killer.name});const visibleError=new Error("Автовыбор не сработал. Отчёт сохранён — откройте Настройки → Диагностика → Открыть папку с логами.");visibleError.report=report;throw visibleError;}
     finally{clipboard.writeText(oldClipboard);}
@@ -1095,7 +1128,7 @@ app.whenReady().then(()=>{
     if(selections.some(selection=>!selection.point)||!searchPoint||!resultPoint||!clearPoint)throw new Error("Откалибруйте нужные слоты, поле поиска, первый результат и кнопку очистки.");
     if(!await gameRunning())throw new Error("Dead by Daylight не запущен. Откройте игру и экран перков.");
     const oldClipboard=clipboard.readText();
-    if(overlayWindow&&!overlayWindow.isDestroyed())overlayWindow.hide();
+    await hideOverlay({immediate:true});
     try{
       await runPerkHelper(selections,searchPoint,resultPoint,clearPoint);
       logDiagnostic("info","perk-selection-complete",{selections:selections.map(selection=>({slot:selection.index+1,perk:selection.perk.name}))});
@@ -1105,7 +1138,8 @@ app.whenReady().then(()=>{
       const visibleError=new Error("Автовыбор перков не сработал. Отчёт сохранён в папке диагностики.");visibleError.report=report;throw visibleError;
     }finally{clipboard.writeText(oldClipboard);}
   });
-  ipcMain.on("overlay:hide",()=>{if(overlayWindow&&!overlayWindow.isDestroyed())overlayWindow.hide();});
+  ipcMain.on("overlay:hide",()=>hideOverlay());
+  ipcMain.on("overlay:hover",(event,hovered)=>{if(!overlayWindow||overlayWindow.isDestroyed()||event.sender!==overlayWindow.webContents||!overlayRequestedVisible)return;animateOverlayOpacity(hovered?1:.28,hovered?145:230)});
   ipcMain.on("window:minimize",()=>mainWindow.minimize());
   ipcMain.on("window:maximize",()=>mainWindow.isMaximized()?mainWindow.unmaximize():mainWindow.maximize());
   ipcMain.on("window:close",()=>mainWindow.close());
@@ -1117,6 +1151,6 @@ app.whenReady().then(()=>{
 
 app.on("render-process-gone",(_event,webContents,details)=>{if(!app.isQuitting&&details.reason!=="clean-exit")logDiagnostic("error","render-process-gone",{url:webContents?.getURL?.()||"",...details})});
 app.on("child-process-gone",(_event,details)=>{if(!app.isQuitting&&details.reason!=="clean-exit")writeCrashReport("child-process-gone",new Error(`Child process: ${details.reason}`),details)});
-app.on("before-quit",()=>{app.isQuitting=true;finishDiagnosticSession("before-quit")});
+app.on("before-quit",()=>{app.isQuitting=true;stopOverlayTracker();finishDiagnosticSession("before-quit")});
 app.on("activate",showMainWindow);
 app.on("will-quit",()=>{globalShortcut.unregisterAll();if(tray){tray.destroy();tray=null;}});
