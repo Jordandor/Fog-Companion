@@ -39,10 +39,6 @@ jobs:
           $setup = "dist/Fog Companion Setup.exe"
           $setupHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $setup).Hash
           "$setupHash  Fog Companion Setup.exe" | Set-Content -LiteralPath "dist/Fog Companion Setup.exe.sha256" -Encoding ascii
-          Copy-Item -LiteralPath $setup -Destination "dist/Fog Companion.exe"
-          "$setupHash  Fog Companion.exe" | Set-Content -LiteralPath "dist/Fog Companion.exe.sha256" -Encoding ascii
-          Copy-Item -LiteralPath $setup -Destination "dist/Fog-Companion.exe"
-          "$setupHash  Fog-Companion.exe" | Set-Content -LiteralPath "dist/Fog-Companion.exe.sha256" -Encoding ascii
 
       - name: Publish GitHub Release
         shell: pwsh
@@ -54,8 +50,4 @@ jobs:
             --generate-notes `
             --verify-tag `
             "dist/Fog Companion Setup.exe" `
-            "dist/Fog Companion Setup.exe.sha256" `
-            "dist/Fog Companion.exe" `
-            "dist/Fog Companion.exe.sha256" `
-            "dist/Fog-Companion.exe" `
-            "dist/Fog-Companion.exe.sha256"
+            "dist/Fog Companion Setup.exe.sha256"
