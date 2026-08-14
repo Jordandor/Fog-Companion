@@ -122,7 +122,7 @@ async function latestReleaseInfo(){
     const manifest=await (await githubResponse(githubPackageManifest)).json(),latest=String(manifest?.version||"").replace(/^v/i,"");
     if(!/^\d+\.\d+\.\d+$/.test(latest))throw apiError;
     const base=`https://github.com/${githubRepository}/releases/download/v${latest}`;
-    return{latest,downloadUrl:`${base}/Fog%20Companion%20Setup.exe`,checksumUrl:`${base}/Fog%20Companion%20Setup.exe.sha256`,source:"manifest"};
+    return{latest,downloadUrl:`${base}/Fog-Companion.exe`,checksumUrl:`${base}/Fog-Companion.exe.sha256`,source:"manifest"};
   }
 }
 async function checkForUpdates(manual=false){
