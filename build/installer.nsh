@@ -2,6 +2,53 @@
 ; chooses a protected folder, elevate only a small helper once. The helper creates
 ; that exact directory and grants the installing user Modify access, allowing all
 ; future in-app updates to remain silent and unelevated.
+
+; Keep the directory selected during the visible first installation. Existing
+; installs without the marker continue to use electron-builder's registered
+; installation directory; the marker becomes authoritative after this install.
+!macro customInit
+  ${If} ${Silent}
+    StrCpy $R9 ""
+    ClearErrors
+    FileOpen $R8 "$APPDATA\fog-companion\install-location.txt" r
+    ${IfNot} ${Errors}
+      FileRead $R8 $R9
+      FileClose $R8
+    ${EndIf}
+
+    ${If} $R9 != ""
+      StrCpy $INSTDIR "$R9"
+      DetailPrint "Restored Fog Companion installation directory: $INSTDIR"
+    ${EndIf}
+
+    ; Some early builds registered an AppData installation as all-users. Do not
+    ; request elevation for that stale registry mode: AppData belongs to the
+    ; current user and is intentionally the chosen installation directory.
+    StrLen $R8 "$APPDATA"
+    StrCpy $R7 "$INSTDIR" $R8
+    StrLen $R6 "$LOCALAPPDATA"
+    StrCpy $R5 "$INSTDIR" $R6
+    ${If} $R7 == "$APPDATA"
+    ${OrIf} $R5 == "$LOCALAPPDATA"
+      StrCpy $hasPerMachineInstallation "0"
+      StrCpy $hasPerUserInstallation "1"
+      StrCpy $installMode CurrentUser
+      SetShellVarContext current
+      DetailPrint "Using the existing per-user Fog Companion installation: $INSTDIR"
+    ${EndIf}
+  ${EndIf}
+!macroend
+
+!macro customInstall
+  CreateDirectory "$APPDATA\fog-companion"
+  ClearErrors
+  FileOpen $R8 "$APPDATA\fog-companion\install-location.txt" w
+  ${IfNot} ${Errors}
+    FileWrite $R8 "$INSTDIR"
+    FileClose $R8
+  ${EndIf}
+!macroend
+
 !macro ensureInstallDirectoryWritable
   !ifndef BUILD_UNINSTALLER
     CreateDirectory "$INSTDIR"

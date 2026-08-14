@@ -51,7 +51,13 @@ Start-Sleep -Milliseconds 70
 if ($SelectionsBase64 -or $NamesBase64) {
   if ($SelectionsBase64) {
     $selectionsJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($SelectionsBase64))
-    $selections = @($selectionsJson | ConvertFrom-Json) | Sort-Object { [int]$_.slot }
+    $selections = @($selectionsJson | ConvertFrom-Json)
+    # Windows PowerShell 5.1 can preserve a JSON array as one nested Object[].
+    # Flatten it before sorting so diagnostics stay clean and slot order is exact.
+    if ($selections.Count -eq 1 -and $selections[0] -is [System.Array]) {
+      $selections = @($selections[0])
+    }
+    $selections = @($selections | Sort-Object { [int]$_.slot })
   } else {
     # Compatibility with helpers launched by older builds.
     $namesJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($NamesBase64))

@@ -36,9 +36,9 @@ jobs:
       - name: Create release assets and SHA-256 files
         shell: pwsh
         run: |
-          $setup = "dist/Fog Companion Setup.exe"
+          $setup = "dist/Fog-Companion-Setup.exe"
           $setupHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $setup).Hash
-          "$setupHash  Fog Companion Setup.exe" | Set-Content -LiteralPath "dist/Fog Companion Setup.exe.sha256" -Encoding ascii
+          "$setupHash  Fog-Companion-Setup.exe" | Set-Content -LiteralPath "dist/Fog-Companion-Setup.exe.sha256" -Encoding ascii
 
       - name: Publish GitHub Release
         shell: pwsh
@@ -49,5 +49,7 @@ jobs:
             --title "Fog Companion ${{ github.ref_name }}" `
             --generate-notes `
             --verify-tag `
-            "dist/Fog Companion Setup.exe" `
-            "dist/Fog Companion Setup.exe.sha256"
+            "dist/Fog-Companion-Setup.exe" `
+            "dist/Fog-Companion-Setup.exe.blockmap" `
+            "dist/Fog-Companion-Setup.exe.sha256" `
+            "dist/latest.yml"

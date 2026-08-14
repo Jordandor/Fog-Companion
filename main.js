@@ -4,6 +4,7 @@ const path = require("path");
 const crypto = require("crypto");
 const http = require("http");
 const { spawn, execFile } = require("child_process");
+const { autoUpdater } = require("electron-updater");
 
 const hasSingleInstanceLock=app.requestSingleInstanceLock();
 if(!hasSingleInstanceLock)app.quit();
@@ -94,6 +95,24 @@ const githubLatestReleaseApi = `https://api.github.com/repos/${githubRepository}
 const githubPackageManifest = `https://raw.githubusercontent.com/${githubRepository}/main/package.json`;
 const appIcon = () => path.join(__dirname,"assets","fog-companion.ico");
 let updateState={status:"idle",currentVersion:app.getVersion(),latestVersion:"",message:"Обновления еще не проверялись.",downloadUrl:"",checksumUrl:""};
+let updateInstallationPromise=null;
+
+autoUpdater.autoDownload=false;
+autoUpdater.autoInstallOnAppQuit=false;
+autoUpdater.autoRunAppAfterInstall=true;
+autoUpdater.allowPrerelease=false;
+autoUpdater.disableWebInstaller=true;
+if(process.platform==="win32")autoUpdater.installDirectory=path.dirname(process.execPath);
+autoUpdater.logger={
+  debug:(...details)=>logDiagnostic("info","electron-updater-debug",details),
+  info:(...details)=>logDiagnostic("info","electron-updater-info",details),
+  warn:(...details)=>logDiagnostic("warn","electron-updater-warn",details),
+  error:(...details)=>logDiagnostic("error","electron-updater-error",details)
+};
+// electron-updater can report a late installer-spawn error after the download
+// promise has resolved. Keep it in diagnostics instead of letting EventEmitter
+// treat an unhandled `error` event as an application crash.
+autoUpdater.on("error",error=>logDiagnostic("error","electron-updater-event-error",{error:diagnosticValue(error)}));
 
 const versionParts=value=>String(value||"").replace(/^v/i,"").split(/[.-]/).slice(0,3).map(part=>Number.parseInt(part,10)||0);
 function isNewerVersion(candidate,current){const next=versionParts(candidate),installed=versionParts(current);for(let index=0;index<3;index++){if(next[index]!==installed[index])return next[index]>installed[index]}return false}
@@ -129,7 +148,7 @@ async function latestReleaseInfo(){
     const manifest=await (await githubResponse(githubPackageManifest)).json(),latest=String(manifest?.version||"").replace(/^v/i,"");
     if(!/^\d+\.\d+\.\d+$/.test(latest))throw apiError;
     const base=`https://github.com/${githubRepository}/releases/download/v${latest}`;
-    return{latest,downloadUrl:`${base}/Fog.Companion.Setup.exe`,checksumUrl:`${base}/Fog.Companion.Setup.exe.sha256`,source:"manifest"};
+    return{latest,downloadUrl:`${base}/Fog-Companion-Setup.exe`,checksumUrl:`${base}/Fog-Companion-Setup.exe.sha256`,source:"manifest"};
   }
 }
 async function checkForUpdates(manual=false){
@@ -144,31 +163,32 @@ async function checkForUpdates(manual=false){
     return state;
   }catch(error){logDiagnostic("warn","update-check-failed",{error:diagnosticValue(error)});return publishUpdateState({status:"error",message:`Не удалось проверить обновления: ${error.message}`,downloadUrl:"",checksumUrl:""})}
 }
-async function installAvailableUpdate(){
+async function performManagedUpdate(){
   if(updateState.status!=="available"||!updateState.downloadUrl||!updateState.checksumUrl)throw new Error("Сначала проверьте наличие обновлений.");
   if(!app.isPackaged)throw new Error("Автоустановка доступна только в собранной версии Fog Companion.");
-  publishUpdateState({status:"downloading",message:`Скачиваю версию ${updateState.latestVersion}…`});
-  const stagingDir=path.join(app.getPath("temp"),"fog-companion-update");fs.mkdirSync(stagingDir,{recursive:true});
-  const stagedExecutable=path.join(stagingDir,`Fog Companion Setup ${updateState.latestVersion}.exe`);
+  publishUpdateState({status:"downloading",message:`Подготавливаю безопасное обновление ${updateState.latestVersion}…`});
+  const onProgress=progress=>{
+    const percent=Math.max(0,Math.min(100,Number(progress?.percent)||0));
+    publishUpdateState({status:"downloading",message:`Скачиваю версию ${updateState.latestVersion}: ${percent.toFixed(0)}%`});
+  };
+  autoUpdater.on("download-progress",onProgress);
   try{
-    const [binaryResponse,checksumResponse]=await Promise.all([githubResponse(updateState.downloadUrl),githubResponse(updateState.checksumUrl)]),binary=Buffer.from(await binaryResponse.arrayBuffer()),checksumText=await checksumResponse.text(),expected=(checksumText.match(/\b[a-f0-9]{64}\b/i)||[])[0]?.toUpperCase();
-    if(!expected)throw new Error("Релиз не содержит корректную контрольную сумму.");
-    const actual=crypto.createHash("sha256").update(binary).digest("hex").toUpperCase();
-    if(actual!==expected)throw new Error("Контрольная сумма обновления не совпала. Установка отменена.");
-    fs.writeFileSync(stagedExecutable,binary);
-    publishUpdateState({status:"installing",message:"Обновление проверено. Запускаю установщик…"});
-    const installedExecutable=process.execPath,updateLog=path.join(diagnosticsDir,"update-install.log"),psQuote=value=>`'${String(value).replace(/'/g,"''")}'`;
-    const updateScript=`$ErrorActionPreference='Stop'\n$oldPid=${process.pid}\n$setup=${psQuote(stagedExecutable)}\n$target=${psQuote(installedExecutable)}\n$uninstaller=Join-Path (Split-Path -Parent $target) 'Uninstall Fog Companion.exe'\n$log=${psQuote(updateLog)}\nfunction Get-FogProcesses {\n  $paths=@($target,$uninstaller)\n  @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {\n    $candidate=$_.ExecutablePath\n    $candidate -and ($paths | Where-Object { [string]::Equals($_,$candidate,[System.StringComparison]::OrdinalIgnoreCase) })\n  })\n}\ntry {\n  "$(Get-Date -Format o) waiting for PID $oldPid" | Out-File -LiteralPath $log -Encoding utf8\n  $deadline=(Get-Date).AddMinutes(2)\n  while(Get-Process -Id $oldPid -ErrorAction SilentlyContinue){if((Get-Date)-gt $deadline){throw 'Fog Companion did not close in time.'};Start-Sleep -Milliseconds 250}\n  Get-FogProcesses | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }\n  $deadline=(Get-Date).AddSeconds(15)\n  while(Get-FogProcesses){if((Get-Date)-gt $deadline){throw 'Fog Companion processes still hold installation files.'};Start-Sleep -Milliseconds 250}\n  "$(Get-Date -Format o) starting silent installer $setup" | Add-Content -LiteralPath $log -Encoding utf8\n  $installer=Start-Process -FilePath $setup -ArgumentList @('/S','--updated') -Wait -PassThru -WindowStyle Hidden\n  if($installer.ExitCode -ne 0){throw "Installer exit code: $($installer.ExitCode)"}\n  Start-Sleep -Milliseconds 900\n  if(!(Test-Path -LiteralPath $target)){throw "Installed executable not found: $target"}\n  "$(Get-Date -Format o) relaunching $target" | Add-Content -LiteralPath $log -Encoding utf8\n  Start-Process -FilePath $target -WindowStyle Hidden\n} catch {\n  "$(Get-Date -Format o) $($_ | Out-String)" | Add-Content -LiteralPath $log -Encoding utf8\n  exit 1\n}`;
-    logDiagnostic("info","update-installer-starting",{fromVersion:app.getVersion(),toVersion:updateState.latestVersion,installer:stagedExecutable,target:installedExecutable});
-    const encodedCommand=Buffer.from(updateScript,"utf16le").toString("base64");
-    const child=spawn("powershell.exe",["-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-EncodedCommand",encodedCommand],{detached:true,stdio:"ignore",windowsHide:true});
-    await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error("Не удалось запустить установщик обновления.")),8000);child.once("spawn",()=>{clearTimeout(timer);resolve()});child.once("error",error=>{clearTimeout(timer);reject(error)})});
-    child.unref();
-    publishUpdateState({status:"installing",message:"Установщик запущен. Companion закроется и откроется уже обновлённым…"});
+    const result=await autoUpdater.checkForUpdates(),managedVersion=String(result?.updateInfo?.version||"").replace(/^v/i,"");
+    if(!managedVersion||!isNewerVersion(managedVersion,app.getVersion()))throw new Error("Служба обновлений не нашла новую версию. Повторите проверку через несколько секунд.");
+    logDiagnostic("info","managed-update-download-starting",{fromVersion:app.getVersion(),toVersion:managedVersion});
+    const downloadedFiles=await autoUpdater.downloadUpdate();
+    logDiagnostic("info","managed-update-downloaded",{fromVersion:app.getVersion(),toVersion:managedVersion,files:downloadedFiles});
+    publishUpdateState({status:"installing",latestVersion:managedVersion,message:"Обновление загружено и проверено. Перезапускаю Fog Companion…"});
     app.isQuitting=true;
-    setTimeout(()=>app.quit(),250);
+    setTimeout(()=>autoUpdater.quitAndInstall(true,true),450);
     return true;
   }catch(error){logDiagnostic("error","update-install-failed",{error:diagnosticValue(error)});publishUpdateState({status:"available",message:`Не удалось установить обновление: ${error.message}`});throw error}
+  finally{autoUpdater.off("download-progress",onProgress)}
+}
+function installAvailableUpdate(){
+  if(updateInstallationPromise)return updateInstallationPromise;
+  updateInstallationPromise=performManagedUpdate().finally(()=>{updateInstallationPromise=null});
+  return updateInstallationPromise;
 }
 
 function demoParticipant(role, character, result, score, perks, number) {

@@ -1,6 +1,6 @@
 {
   "name": "fog-companion",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Fog Companion for Dead by Daylight",
   "main": "main.js",
   "author": "Codex",
@@ -14,10 +14,20 @@
     "electron": "^37.2.0",
     "electron-builder": "^26.0.12"
   },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  },
   "build": {
     "appId": "local.fogcompanion.desktop",
     "productName": "Fog Companion",
-    "artifactName": "Fog Companion Setup.${ext}",
+    "artifactName": "Fog-Companion-Setup.${ext}",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Jordandor",
+        "repo": "Fog-Companion"
+      }
+    ],
     "asar": true,
     "files": [
       "main.js",
@@ -54,6 +64,7 @@
       "allowToChangeInstallationDirectory": true,
       "include": "build/installer.nsh",
       "perMachine": false,
+      "runAfterFinish": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Fog Companion",
