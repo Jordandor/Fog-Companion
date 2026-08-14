@@ -514,7 +514,56 @@ async function refreshStoredProfileAvatar() {
 
 const addonIndexPages=["Фонарик (улучшения)","Аптечка (улучшения)","Ящик с инструментами (улучшения)","Карта (улучшения)","Ключ (улучшения)"];
 const wikiOrigin="https://dead-by-daylight.fandom.com";
+const killerPerkIndexPage="Навыки убийц";
 const killerPerkCategory="Категория:Умения Убийц";
+const perkCatalogSchema=3;
+const perkWikiAliases={
+  "Смотри, они бегут":"Поиграть со своей жертвой","Пусть ждут":"Оставьте лучшее напоследок","Истребление слабых":"Угасающий свет",
+  "Все средства хороши":"Мертвая хватка (сенобит)","Порча: шут судьбы":"Порча: игрушка","Секущий крюк: сочащиеся раны":"Секущий крюк: дар боли",
+  "Секущий крюк «Пучина ярости»":"Секущий крюк: пучина ярости"
+};
+const perkNameAliases={Dying_Light:"Угасающий свет",DyingLight:"Угасающий свет",DecisiveStrike:"Решающий удар",ObjectOfObsession:"Объект одержимости"};
+function perkDisplayTitle(value){return String(value||"").replace(/\s+\(сенобит\)$/i,"").trim()}
+function localizePerkItem(item){if(!item)return item;const aliasTitle=perkWikiAliases[String(item.name||"")]||"",wikiTitle=item.wikiTitle||aliasTitle||item.name,name=perkNameAliases[String(item.id||"")]||perkNameAliases[String(item.name||"")]||perkDisplayTitle(wikiTitle);return{...item,name,wikiTitle}}
+function normalizedPerkName(value){return String(value||"").trim().toLocaleLowerCase("ru-RU").replace(/ё/g,"е")}
+function isRealKillerPerkItem(item){const name=normalizedPerkName(item?.name);return Boolean(name)&&!new Set(["навыки убийц","навыки убийцы","умения убийц","умения убийцы"]).has(name)&&!/\(класс\)$/.test(name)}
+function perkIdentity(item){return normalizedPerkName(localizePerkItem(item)?.wikiTitle||localizePerkItem(item)?.name)}
+function canonicalizePerkItems(items){const result=new Map();for(const raw of Array.isArray(items)?items:[]){const item=localizePerkItem(raw);if(!isRealKillerPerkItem(item))continue;const key=perkIdentity(item),previous=result.get(key);result.set(key,previous?{...item,...previous,name:item.name||previous.name,image:previous.image||item.image||""}:item)}return [...result.values()].sort((a,b)=>a.name.localeCompare(b.name,"ru")||perkIdentity(a).localeCompare(perkIdentity(b),"ru"))}
+function wikiAttribute(attrs,name){const match=String(attrs||"").match(new RegExp(`(?:^|\\s)${name}="([^"]+)"`,"i"));return match?decodeHtml(match[1]):""}
+function killerPerksFromIndexHtml(html){
+  const source=String(html||""),start=source.indexOf('id="Уникальные_навыки_убийц"'),scope=start>=0?source.slice(start):source,items=[],seen=new Set();
+  for(const match of scope.matchAll(/<a\b([^>]*)>\s*<img\b([^>]*)>/gi)){
+    const linkAttrs=match[1],imageAttrs=match[2],name=wikiAttribute(linkAttrs,"title"),href=wikiAttribute(linkAttrs,"href");
+    const image=wikiAttribute(imageAttrs,"data-src")||wikiAttribute(imageAttrs,"src");
+    if(!name||!image||image.startsWith("data:")||!/^\/ru\/wiki\//i.test(href)||seen.has(normalizedPerkName(name)))continue;
+    const item=localizePerkItem({id:`wiki-perk:${normalizedPerkName(name)}`,name:perkDisplayTitle(name),wikiTitle:name,image});
+    if(!isRealKillerPerkItem(item))continue;
+    seen.add(normalizedPerkName(name));items.push(item);
+  }
+  return canonicalizePerkItems(items);
+}
+function killerPerksFromCategoryPages(pages){
+  return canonicalizePerkItems((Array.isArray(pages)?pages:[]).map(page=>localizePerkItem({
+    id:`wiki-${page.pageid}`,
+    name:String(page.title||"").trim(),
+    image:page.thumbnail?.source||page.original?.source||""
+  })).filter(item=>item.image&&isRealKillerPerkItem(item)));
+}
+function mergePerkCatalogImages(items,imageItems){
+  const imageByIdentity=new Map(canonicalizePerkItems(imageItems).map(item=>[perkIdentity(item),item.image]));
+  return canonicalizePerkItems(canonicalizePerkItems(items).map(item=>({...item,image:imageByIdentity.get(perkIdentity(item))||item.image||""})));
+}
+function applyPerkCatalog(items,previousItems=[]){
+  const catalog=canonicalizePerkItems(items),byIdentity=new Map(catalog.map(item=>[perkIdentity(item),item])),oldById=new Map(canonicalizePerkItems(previousItems).map(item=>[String(item.id),item]));
+  const resolve=item=>byIdentity.get(perkIdentity(item))||catalog.find(candidate=>normalizedPerkName(candidate.name)===normalizedPerkName(localizePerkItem(item)?.name));
+  if(store.settings.perkFilterInitialized&&Array.isArray(store.settings.enabledPerkIds)){
+    const enabledNames=new Set(store.settings.enabledPerkIds.map(id=>oldById.get(String(id))).filter(Boolean).map(perkIdentity));
+    store.settings.enabledPerkIds=catalog.filter(item=>enabledNames.has(perkIdentity(item))||store.settings.enabledPerkIds.includes(item.id)).map(item=>item.id);
+  }else{store.settings.enabledPerkIds=catalog.map(item=>item.id);store.settings.perkFilterInitialized=true}
+  if(Array.isArray(store.randomizer?.perks))store.randomizer.perks=store.randomizer.perks.map(item=>resolve(item)||null);
+  if(Array.isArray(store.randomizer?.perkHistory))store.randomizer.perkHistory=store.randomizer.perkHistory.map(group=>Array.isArray(group)?group.map(id=>oldById.get(String(id))).map(resolve).filter(Boolean).map(item=>item.id):group);
+  return catalog;
+}
 async function requestWikiJson(url,{attempts=3}={}){
   let lastError;
   for(let attempt=1;attempt<=attempts;attempt++){
@@ -527,20 +576,25 @@ async function requestWikiJson(url,{attempts=3}={}){
   throw lastError||new Error("Каталог перков временно недоступен");
 }
 async function getKillerPerkCatalog(){
-  const cached=Array.isArray(store.perkCatalog?.items)?store.perkCatalog.items:[];
-  if(cached.length>=100&&Date.now()-Number(store.perkCatalog.syncedAt||0)<7*24*60*60*1000){
-    if(!store.settings.perkFilterInitialized||!Array.isArray(store.settings.enabledPerkIds)){store.settings.enabledPerkIds=cached.map(item=>item.id);store.settings.perkFilterInitialized=true;writeStore(store)}
+  const rawCached=Array.isArray(store.perkCatalog?.items)?store.perkCatalog.items:[],cached=canonicalizePerkItems(rawCached);
+  if(store.perkCatalog?.schemaVersion===perkCatalogSchema&&cached.length>=100&&Date.now()-Number(store.perkCatalog.syncedAt||0)<7*24*60*60*1000){
     return cached;
   }
-  const query=new URLSearchParams({action:"query",generator:"categorymembers",gcmtitle:killerPerkCategory,gcmtype:"page",gcmlimit:"500",prop:"pageimages",piprop:"thumbnail|original",pithumbsize:"256",format:"json",formatversion:"2",origin:"*"});
+  const indexQuery=new URLSearchParams({action:"parse",page:killerPerkIndexPage,prop:"text",format:"json",formatversion:"2",origin:"*"});
+  const imageQuery=new URLSearchParams({action:"query",generator:"categorymembers",gcmtitle:killerPerkCategory,gcmtype:"page",gcmlimit:"max",prop:"pageimages",piprop:"thumbnail|original",pithumbsize:"256",format:"json",formatversion:"2",origin:"*"});
   try{
-    const payload=await requestWikiJson(`${wikiOrigin}/ru/api.php?${query}`),pages=Array.isArray(payload?.query?.pages)?payload.query.pages:[],items=pages.map(page=>({id:`wiki-${page.pageid}`,name:String(page.title||"").trim(),image:page.thumbnail?.source||page.original?.source||""})).filter(item=>item.name&&!/^(?:Категория|Шаблон):/i.test(item.name)).sort((a,b)=>a.name.localeCompare(b.name,"ru"));
-    if(items.length<80)throw new Error(`Каталог вернул только ${items.length} перков`);
-    store.perkCatalog={items,syncedAt:Date.now()};
-    if(!store.settings.perkFilterInitialized||!Array.isArray(store.settings.enabledPerkIds)){store.settings.enabledPerkIds=items.map(item=>item.id);store.settings.perkFilterInitialized=true}
+    const [indexPayload,imagePayload]=await Promise.all([
+      requestWikiJson(`${wikiOrigin}/ru/api.php?${indexQuery}`),
+      requestWikiJson(`${wikiOrigin}/ru/api.php?${imageQuery}`)
+    ]);
+    const namedPerks=killerPerksFromIndexHtml(indexPayload?.parse?.text);
+    const currentImages=killerPerksFromCategoryPages(imagePayload?.query?.pages);
+    const parsed=mergePerkCatalogImages(namedPerks,currentImages),items=applyPerkCatalog(parsed,rawCached);
+    if(items.length<100)throw new Error(`Таблица Wiki вернула только ${items.length} перков`);
+    store.perkCatalog={items,syncedAt:Date.now(),schemaVersion:perkCatalogSchema,source:"wiki-killer-perks-index+pageimages"};
     writeStore(store);return items;
   }catch(error){
-    if(cached.length)return cached;
+    if(cached.length){const items=applyPerkCatalog(cached,rawCached);store.perkCatalog={...(store.perkCatalog||{}),items};writeStore(store);return items}
     throw error;
   }
 }
@@ -567,7 +621,7 @@ async function getPerkDetails(perk,kind="Навык") {
   const preferred=String(perk?.id||"").trim(),isAddon=/^аддон/i.test(String(kind)),addonOwner=String(perk?.owner||"").trim();
   const normalizedWikiName=name.replace(/[«»]/g,'"').replace(/[‘’]/g,"'");
   let page="",payload=null;
-  for(const candidate of [...new Set((isAddon?[]:[name,normalizedWikiName,preferred]).filter(Boolean))]){
+  for(const candidate of [...new Set((isAddon?[]:[perk?.wikiTitle,name,normalizedWikiName,preferred]).filter(Boolean))]){
     const candidatePage=candidate.replace(/\s+/g,"_");
     const candidatePayload=await requestJson(`${wikiOrigin}/ru/api.php?action=parse&page=${encodeURIComponent(candidatePage)}&prop=text|displaytitle&format=json&formatversion=2&origin=*`);
     if(!candidatePayload?.error&&candidatePayload?.parse?.text){page=candidatePage;payload=candidatePayload;break;}

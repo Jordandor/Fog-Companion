@@ -10,7 +10,9 @@
 .overlay-hint { font-size: 9px; }
 .overlay-result-portrait { position: relative; width: 82px; height: 88px; margin: 0 auto 8px; overflow: hidden; border: 1px solid rgba(198,23,33,.38); border-radius: 7px; background: radial-gradient(circle at 50% 32%,#38333a,#111216 72%); isolation:isolate; }
 .overlay-result-portrait img { width: 100%; height: 100%; object-fit: cover; object-position: center top; transform:scale(1.03); }
-.overlay-result-portrait::after { content:""; position:absolute; z-index:2; inset:0; pointer-events:none; background:linear-gradient(90deg,rgba(14,15,18,.95),transparent 20%,transparent 80%,rgba(14,15,18,.95)),linear-gradient(0deg,rgba(14,15,18,.66),transparent 25%); box-shadow:inset 0 0 12px #090a0d; }
+.overlay-result-portrait::after { content:""; position:absolute; z-index:4; inset:0; pointer-events:none; background:radial-gradient(ellipse at center,transparent 56%,rgba(12,13,16,.09) 74%,rgba(12,13,16,.36) 100%),linear-gradient(0deg,rgba(14,15,18,.34),transparent 20%); box-shadow:inset 0 0 7px rgba(9,10,13,.68); }
+.overlay-result-portrait .portrait-fog-canvas { position:absolute; z-index:3; inset:0; display:block; width:100%; height:100%; pointer-events:none; opacity:.88; }
+.overlay-result-portrait.mystery .portrait-fog-canvas { opacity:0; }
 .overlay-result-portrait span { position: absolute; z-index: 1; inset: 0; display: grid; place-items: center; color: rgba(239,233,229,.67); font-family: Georgia,serif; font-size: 48px; }
 .overlay-result-portrait:not(.mystery) span { display: none; }
 .overlay-result-portrait.portrait-error span { display: grid; font-size: 34px; }
@@ -21,6 +23,9 @@
 .overlay-brand-emblem { display:block; width:38px; height:38px; flex:none; object-fit:contain; opacity:.97; filter:drop-shadow(0 0 6px rgba(198,43,52,.48)); }
 
 .overlay-content { padding-top:13px; }
+.wheel-stage::before { content:""; position:absolute; z-index:0; inset:5%; border-radius:50%; pointer-events:none; box-shadow:0 12px 22px rgba(0,0,0,.5),0 0 13px rgba(137,24,32,.14); }
+.wheel-stage canvas { position:relative; z-index:1; transform-origin:50% 50%; will-change:transform; backface-visibility:hidden; contain:strict; filter:none!important; }
+.wheel-stage .pointer,.wheel-stage .wheel-core { z-index:2; }
 .overlay-tabs { display:flex; justify-content:center; gap:5px; min-height:38px; margin-top:10px; }
 .overlay-tabs button { min-width:92px; padding:6px 10px; border:1px solid rgba(255,255,255,.1); border-radius:5px; background:#18191e; color:#7b777d; font-size:9px; cursor:pointer; }
 .overlay-tabs button.active { border-color:rgba(198,43,52,.45); background:#711a21; color:#fff; }
